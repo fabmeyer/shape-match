@@ -1,18 +1,22 @@
 import { quat } from 'wgpu-matrix';
 import { initWebGPU } from './webgpu-init.ts';
-import { ArcballCamera } from './arcball.ts';
+import { ArcballCamera, type ViewName } from './arcball.ts';
 import { flatControlNet, getPoint, getWeight, setWeight } from './controlNet.ts';
 import { PointDragger } from './pointDrag.ts';
 import { History } from './history.ts';
 import { evaluate } from './nurbs.ts';
 import { ParamSpaceView } from './paramSpace.ts';
+import { PartitionView } from './partition.ts';
 import { updateMathPanel } from './mathPanel.ts';
+import { level1, shiftedPoints, TARGET_OFFSET } from './target.ts';
+import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import tessellateCode from './shaders/tessellate.wgsl?raw';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
 import stemsCode from './shaders/stems.wgsl?raw';
 import polygonCode from './shaders/polygon.wgsl?raw';
 import gizmoCode from './shaders/gizmo.wgsl?raw';
+import curvesCode from './shaders/curves.wgsl?raw';
 
 const canvas = document.getElementById('gpuCanvas') as HTMLCanvasElement;
 const { device, context, format } = await initWebGPU(canvas);
@@ -36,9 +40,16 @@ function getDepthTexture(): GPUTexture {
   return depthTexture;
 }
 
+// far enough back that both surfaces (together about 5 wide) fit across the view;
+// a narrow window needs a larger distance (fovY = 45 degrees, as in the camera)
+function startDistance(): number {
+  const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
+  return Math.max(5, 3.4 / (Math.tan(Math.PI / 8) * Math.min(aspect, 1.6)));
+}
+
 const camera = new ArcballCamera(canvas, {
-  target: [0, 0, 0],
-  distance: 4,
+  target: [TARGET_OFFSET / 2, 0, 0], // between the two surfaces
+  distance: startDistance(),
   orientation: quat.fromAxisAngle([1, 0, 0], (50 * Math.PI) / 180),
 });
 
@@ -89,6 +100,24 @@ const markerFlagBuffer = device.createBuffer({
 });
 device.queue.writeBuffer(markerFlagBuffer, 0, new Uint32Array([FLAG_MARKER]));
 
+// walkers (slide 26): line segments of the curves, and one dot per row of control points
+const walkerSegmentBuffer = device.createBuffer({
+  label: 'walker segments',
+  size: MAX_SEGMENTS * SEGMENT_FLOATS * 4,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+const walkerPointBuffer = device.createBuffer({
+  label: 'walker points',
+  size: net.countV * 16,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+const walkerFlagBuffer = device.createBuffer({
+  label: 'walker flags',
+  size: net.countV * 4,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+let walkerSegmentCount = 0;
+
 // control polygon: one line between every two neighbouring control points (in u and in v)
 const segments: number[] = [];
 for (let j = 0; j < net.countV; j++) {
@@ -124,8 +153,10 @@ const gizmoBuffer = device.createBuffer({
 type Mode = 'rotate' | 'select';
 let mode: Mode = 'rotate';
 let showPolygon = true;
-let showParam = true;  // parameter space section expanded
 let showMath = false;  // formula section expanded
+let showSolution = false; // control points of the target
+let showWalkers = false;  // row curves, walkers and iso-curve at the current (u, v)
+let showMarker = true;    // the pink dot S(u, v) on the surface
 
 // copy of the initial control points, for the reset button
 const initialPoints = net.points.slice();
@@ -148,6 +179,13 @@ const dragger = new PointDragger(canvas, camera, net, {
   onEdit: pointsChanged,
 });
 const paramView = new ParamSpaceView(document.getElementById('uvCanvas') as HTMLCanvasElement, net, updateMath);
+
+// partition of unity: one plot per parameter direction; dragging in it moves u or v
+const partitionPanel = document.getElementById('partitionPanel') as HTMLDetailsElement;
+const partitionU = new PartitionView(document.getElementById('partitionU') as HTMLCanvasElement, 'u',
+  net.countU, net.p, net.knotsU, (u) => { paramView.u = u; paramView.draw(); updateMath(); });
+const partitionV = new PartitionView(document.getElementById('partitionV') as HTMLCanvasElement, 'v',
+  net.countV, net.q, net.knotsV, (v) => { paramView.v = v; paramView.draw(); updateMath(); });
 
 // the selection stays when rotating, but it is only shown (and editable) in select mode
 const NO_SELECTION = new Set<number>();
@@ -178,16 +216,33 @@ function selectionChanged() {
 let surfaceEval = evaluate(net, paramView.u, paramView.v);
 function updateMath() {
   surfaceEval = evaluate(net, paramView.u, paramView.v);
+  if (partitionPanel.open) {
+    partitionU.t = paramView.u;
+    partitionV.t = paramView.v;
+    partitionU.draw();
+    partitionV.draw();
+  }
   markerData.set([...surfaceEval.point, 1]);
   device.queue.writeBuffer(markerBuffer, 0, markerData);
   uploadFlags();
   if (showMath) updateMathPanel(mathValues, net, surfaceEval);
+  if (showWalkers) uploadWalkers();
+}
+
+// the walkers depend on the control points and on (u, v), so they are rebuilt with the math
+function uploadWalkers() {
+  const walkers = buildWalkers(net, paramView.u, paramView.v);
+  walkerSegmentCount = walkers.segmentCount;
+  device.queue.writeBuffer(walkerSegmentBuffer, 0, walkers.segments, 0, walkerSegmentCount * SEGMENT_FLOATS);
+  device.queue.writeBuffer(walkerPointBuffer, 0, walkers.points);
+  device.queue.writeBuffer(walkerFlagBuffer, 0, walkers.flags);
 }
 
 function uploadFlags() {
   flagData.fill(0);
   for (const k of visibleSelection()) flagData[k] |= FLAG_SELECTED;
-  if (showParam || showMath) {
+  // the awake control points belong to the surface point: marked only while it is shown
+  if (showMarker) {
     for (let l = 0; l <= net.q; l++) {
       for (let k = 0; k <= net.p; k++) {
         flagData[(surfaceEval.spanV - net.q + l) * net.countU + surfaceEval.spanU - net.p + k] |= FLAG_ACTIVE;
@@ -292,23 +347,45 @@ function setMode(next: Mode) {
 }
 
 modeButtons.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode as Mode)));
+
+// views: perspective, or straight along an axis (top = xy-plane, front = xz-plane, side = yz-plane)
+const viewButtons = document.querySelectorAll<HTMLButtonElement>('#view button');
+function showView(view: ViewName) {
+  viewButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+}
+viewButtons.forEach((b) => b.addEventListener('click', () => {
+  camera.setView(b.dataset.view as ViewName);
+  showView(camera.view);
+}));
+camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
 setMode('rotate');
 
 // the control polygon has an on/off switch (a checkbox) instead of a button
 const polygonSwitch = document.getElementById('togglePolygon') as HTMLInputElement;
 polygonSwitch.addEventListener('change', () => { showPolygon = polygonSwitch.checked; });
+const solutionSwitch = document.getElementById('toggleSolution') as HTMLInputElement;
+solutionSwitch.addEventListener('change', () => { showSolution = solutionSwitch.checked; });
+const markerSwitch = document.getElementById('toggleMarker') as HTMLInputElement;
+markerSwitch.addEventListener('change', () => {
+  showMarker = markerSwitch.checked;
+  uploadFlags(); // the cyan rings follow the switch
+});
+const walkersSwitch = document.getElementById('toggleWalkers') as HTMLInputElement;
+walkersSwitch.addEventListener('change', () => {
+  showWalkers = walkersSwitch.checked;
+  updateMath();
+});
 // the two side panel sections can be collapsed; while a section is collapsed,
 // its work (drawing, numbers, marker and active highlight) is skipped
 paramPanel.addEventListener('toggle', () => {
-  showParam = paramPanel.open;
   paramView.draw(); // the canvas had no size while collapsed
   updateMath();
 });
+partitionPanel.addEventListener('toggle', () => updateMath()); // the plots had no size while collapsed
 mathPanel.addEventListener('toggle', () => {
   showMath = mathPanel.open;
   updateMath();
 });
-showParam = paramPanel.open;
 showMath = mathPanel.open;
 updateMath();
 
@@ -352,6 +429,60 @@ const normalBuffer = device.createBuffer({
   size: RES_U * RES_V * 16,
   usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX,
 });
+
+// ---------------------------------------------------------
+// Target surface, drawn beside the learner's surface
+// ---------------------------------------------------------
+
+const task = level1();
+document.getElementById('taskTitle')!.textContent = task.title;
+document.getElementById('taskText')!.textContent = task.text;
+
+// paramsBuffer and knotBuffer are shared, so the target must have the learner's layout
+const t = task.target;
+if (t.countU !== net.countU || t.countV !== net.countV || t.p !== net.p || t.q !== net.q
+    || t.knotsU.join() !== net.knotsU.join() || t.knotsV.join() !== net.knotsV.join()) {
+  throw new Error('The target needs the same control net layout, degrees and knots as the learner\'s net.');
+}
+
+const targetPointData = shiftedPoints(task.target, TARGET_OFFSET);
+const targetPointBuffer = device.createBuffer({
+  label: 'target control points',
+  size: targetPointData.byteLength,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(targetPointBuffer, 0, targetPointData);
+
+const targetPositionBuffer = device.createBuffer({
+  label: 'target positions',
+  size: RES_U * RES_V * 16,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX,
+});
+const targetNormalBuffer = device.createBuffer({
+  label: 'target normals',
+  size: RES_U * RES_V * 16,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX,
+});
+
+// the target never changes: it is evaluated once, in the first frame
+let targetDirty = true;
+
+// target control points (solution switch): never selected, so all flags 0
+const targetFlagBuffer = device.createBuffer({
+  label: 'target point flags',
+  size: pointCount * 4,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(targetFlagBuffer, 0, new Uint32Array(pointCount));
+
+// surface colours (surfaceColor in surface.wgsl)
+function colorBuffer(label: string, rgb: [number, number, number]): GPUBuffer {
+  const buffer = device.createBuffer({ label, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(buffer, 0, new Float32Array([...rgb, 1]));
+  return buffer;
+}
+const learnerColorBuffer = colorBuffer('learner colour', [0.45, 0.55, 0.75]);
+const targetColorBuffer = colorBuffer('target colour', [0.85, 0.58, 0.38]);
 
 // two triangles per grid cell; the patch is open, so no wrap-around like the torus knot
 const surfaceIndices = new Uint32Array((RES_U - 1) * (RES_V - 1) * 6);
@@ -444,6 +575,21 @@ const gizmoPipeline = device.createRenderPipeline({
   depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' },
 });
 
+// walkers: two pipelines from the same shader, for the parts in front of and behind the surface
+const curvesModule = device.createShaderModule({ label: 'curves', code: curvesCode });
+function curvesPipeline(hidden: boolean): GPURenderPipeline {
+  return device.createRenderPipeline({
+    label: hidden ? 'curves behind' : 'curves',
+    layout: 'auto',
+    vertex: { module: curvesModule, entryPoint: 'vs_main' },
+    fragment: { module: curvesModule, entryPoint: 'fs_main', targets: [{ format }], constants: { HIDDEN: hidden ? 1 : 0 } },
+    primitive: { topology: 'triangle-list' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: hidden ? 'greater' : 'less-equal' },
+  });
+}
+const curvesFrontPipeline = curvesPipeline(false);
+const curvesBehindPipeline = curvesPipeline(true);
+
 const tessellateBindGroup = device.createBindGroup({
   layout: tessellatePipeline.getBindGroupLayout(0),
   entries: [
@@ -456,7 +602,29 @@ const tessellateBindGroup = device.createBindGroup({
 });
 const surfaceBindGroup = device.createBindGroup({
   layout: surfacePipeline.getBindGroupLayout(0),
-  entries: [{ binding: 0, resource: { buffer: cameraBuffer } }],
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: learnerColorBuffer } },
+  ],
+});
+
+// the target uses the same pipelines with its own buffers
+const targetTessellateBindGroup = device.createBindGroup({
+  layout: tessellatePipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: paramsBuffer } },
+    { binding: 1, resource: { buffer: targetPointBuffer } },
+    { binding: 2, resource: { buffer: knotBuffer } },
+    { binding: 3, resource: { buffer: targetPositionBuffer } },
+    { binding: 4, resource: { buffer: targetNormalBuffer } },
+  ],
+});
+const targetSurfaceBindGroup = device.createBindGroup({
+  layout: surfacePipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: targetColorBuffer } },
+  ],
 });
 const pointsBindGroup = device.createBindGroup({
   layout: pointsPipeline.getBindGroupLayout(0),
@@ -481,6 +649,38 @@ const polygonBindGroup = device.createBindGroup({
     { binding: 0, resource: { buffer: cameraBuffer } },
     { binding: 1, resource: { buffer: controlPointBuffer } },
     { binding: 2, resource: { buffer: segmentBuffer } },
+  ],
+});
+const targetPointsBindGroup = device.createBindGroup({
+  layout: pointsPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: targetPointBuffer } },
+    { binding: 2, resource: { buffer: targetFlagBuffer } },
+  ],
+});
+const targetPolygonBindGroup = device.createBindGroup({
+  layout: polygonPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: targetPointBuffer } },
+    { binding: 2, resource: { buffer: segmentBuffer } },
+  ],
+});
+// 'auto' layouts belong to one pipeline, so each curves pipeline gets its own bind group
+const curvesBindGroups = [curvesFrontPipeline, curvesBehindPipeline].map((pipeline) => device.createBindGroup({
+  layout: pipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: walkerSegmentBuffer } },
+  ],
+}));
+const walkerPointsBindGroup = device.createBindGroup({
+  layout: pointsPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: cameraBuffer } },
+    { binding: 1, resource: { buffer: walkerPointBuffer } },
+    { binding: 2, resource: { buffer: walkerFlagBuffer } },
   ],
 });
 const gizmoBindGroup = device.createBindGroup({
@@ -519,13 +719,20 @@ function frame() {
   const encoder = device.createCommandEncoder();
 
   // evaluate the surface again, but only if a control point changed
-  if (surfaceDirty) {
+  if (surfaceDirty || targetDirty) {
     const compute = encoder.beginComputePass();
     compute.setPipeline(tessellatePipeline);
-    compute.setBindGroup(0, tessellateBindGroup);
-    compute.dispatchWorkgroups(Math.ceil(RES_U / 8), Math.ceil(RES_V / 8));
+    if (surfaceDirty) {
+      compute.setBindGroup(0, tessellateBindGroup);
+      compute.dispatchWorkgroups(Math.ceil(RES_U / 8), Math.ceil(RES_V / 8));
+    }
+    if (targetDirty) {
+      compute.setBindGroup(0, targetTessellateBindGroup);
+      compute.dispatchWorkgroups(Math.ceil(RES_U / 8), Math.ceil(RES_V / 8));
+    }
     compute.end();
     surfaceDirty = false;
+    targetDirty = false;
   }
 
   const pass = encoder.beginRenderPass({
@@ -550,6 +757,20 @@ function frame() {
   pass.setIndexBuffer(surfaceIndexBuffer, 'uint32');
   pass.drawIndexed(surfaceIndices.length);
 
+  pass.setBindGroup(0, targetSurfaceBindGroup);
+  pass.setVertexBuffer(0, targetPositionBuffer);
+  pass.setVertexBuffer(1, targetNormalBuffer);
+  pass.drawIndexed(surfaceIndices.length); // same grid, so the same index buffer
+
+  if (showWalkers) {
+    pass.setPipeline(curvesBehindPipeline);
+    pass.setBindGroup(0, curvesBindGroups[1]);
+    pass.draw(6, walkerSegmentCount);
+    pass.setPipeline(curvesFrontPipeline);
+    pass.setBindGroup(0, curvesBindGroups[0]);
+    pass.draw(6, walkerSegmentCount);
+  }
+
   pass.setPipeline(stemsPipeline);
   pass.setBindGroup(0, stemsBindGroup);
   pass.draw(2, pointCount);
@@ -560,11 +781,27 @@ function frame() {
     pass.draw(2, segmentCount);
   }
 
+  if (showSolution) {
+    if (showPolygon) {
+      pass.setPipeline(polygonPipeline);
+      pass.setBindGroup(0, targetPolygonBindGroup);
+      pass.draw(2, segmentCount);
+    }
+    pass.setPipeline(pointsPipeline);
+    pass.setBindGroup(0, targetPointsBindGroup);
+    pass.draw(6, pointCount);
+  }
+
   pass.setPipeline(pointsPipeline);
   pass.setBindGroup(0, pointsBindGroup);
   pass.draw(6, pointCount);
 
-  if (showParam || showMath) {
+  if (showWalkers) {
+    pass.setBindGroup(0, walkerPointsBindGroup);
+    pass.draw(6, net.countV);
+  }
+
+  if (showMarker) {
     pass.setBindGroup(0, markerBindGroup);
     pass.draw(6, 1);
   }

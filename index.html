@@ -14,7 +14,9 @@
     #gpuCanvas[data-mode="rotate"]:active { cursor: grabbing; }
     #gpuCanvas[data-mode="select"] { cursor: crosshair; }
 
-    #toolbar { position: fixed; top: 12px; left: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    /* right: stays inside the 3D view (side panel 330 px + margin); wraps to a second row when narrow */
+    #toolbar { position: fixed; top: 12px; left: 12px; right: 342px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; pointer-events: none; }
+    #toolbar > * { pointer-events: auto; } /* the empty part of the toolbar does not block the 3D view */
     .group {
       display: flex; padding: 3px; gap: 3px;
       background: #1e2027; border: 1px solid #333844; border-radius: 8px;
@@ -25,7 +27,8 @@
     }
     #toolbar button:hover:not(:disabled) { background: #2a2e38; }
     #toolbar button:disabled { color: #5c606b; cursor: default; }
-    #toolbar button[aria-pressed="true"] { background: #4a7bd0; color: #fff; }
+    /* also while hovered: otherwise the hover style hides which button is pressed */
+    #toolbar button[aria-pressed="true"], #toolbar button[aria-pressed="true"]:hover:not(:disabled) { background: #4a7bd0; color: #fff; }
 
     /* round icon button */
     #toolbar .icon-button {
@@ -69,6 +72,7 @@
       border: 1px solid #333844; border-radius: 4px; font: inherit;
     }
     #uvCanvas { width: 100%; aspect-ratio: 1; display: block; touch-action: none; cursor: crosshair; }
+    canvas.partition { width: 100%; height: 130px; display: block; touch-action: none; cursor: ew-resize; margin: 4px 0 6px; }
 
     math { font-size: 15px; }
     #mathPanel math[display="block"] { margin: 10px 0; }
@@ -93,6 +97,9 @@
     #mathValues table { border-collapse: collapse; margin: 6px 0; font-variant-numeric: tabular-nums; }
     #mathValues th { padding: 3px 6px; font-weight: 400; color: #9aa0aa; font-size: 12px; text-align: right; }
     #mathValues td { padding: 3px 8px; border: 1px solid #333844; text-align: right; }
+    #mathValues h3 { margin: 14px 0 4px; font-size: 13px; font-weight: 600; color: #e6e8ec; }
+    .green { color: #4fd68a; }
+    .orange { color: #f2894e; }
   </style>
 </head>
 <body>
@@ -102,6 +109,12 @@
     <div id="mode" class="group" role="group" aria-label="Mouse mode">
       <button data-mode="rotate" aria-pressed="true" title="Drag to rotate the view">Rotate</button>
       <button data-mode="select" aria-pressed="false" title="Click or drag a rectangle to select control points, drag an arrow to move them">Select</button>
+    </div>
+    <div id="view" class="group" role="group" aria-label="View">
+      <button data-view="perspective" aria-pressed="true" title="Free 3D view (rotate with the mouse in Rotate mode)">Perspective</button>
+      <button data-view="top" aria-pressed="false" title="Straight from above, onto the xy-plane">Top</button>
+      <button data-view="front" aria-pressed="false" title="Straight from the front, onto the xz-plane">Front</button>
+      <button data-view="side" aria-pressed="false" title="Straight from the side, onto the yz-plane">Side</button>
     </div>
     <button id="undo" class="icon-button" title="Undo the last change (Ctrl+Z)" aria-label="Undo" disabled>
       <!-- arrow turning back to the left -->
@@ -119,10 +132,30 @@
         <span class="track"></span>
         Polygon
       </label>
+      <label class="switch" title="Show the control points of the target">
+        <input id="toggleSolution" type="checkbox" role="switch">
+        <span class="track"></span>
+        Solution
+      </label>
+      <label class="switch" title="Curves of curves: one green curve per row of control points, the orange curve through their walkers">
+        <input id="toggleWalkers" type="checkbox" role="switch">
+        <span class="track"></span>
+        Walkers
+      </label>
+      <label class="switch" title="The pink dot: the surface point S(u, v) for the pink dot in the parameter space">
+        <input id="toggleMarker" type="checkbox" role="switch" checked>
+        <span class="track"></span>
+        Surface point
+      </label>
     </div>
   </div>
 
   <aside id="side">
+    <section>
+      <h2 id="taskTitle">Task</h2>
+      <p id="taskText"></p>
+    </section>
+
     <section>
       <h2>Control points</h2>
       <p id="selectionInfo" class="muted"></p>
@@ -139,6 +172,17 @@
       <canvas id="uvCanvas"></canvas>
       <p class="muted">Drag the pink dot. Lines are knots. The pink dot on the surface is S(u, v);
         control points with a cyan ring influence it.</p>
+      </details>
+    </section>
+
+    <section>
+      <details id="partitionPanel" class="section" open>
+        <summary>Partition of unity</summary>
+        <canvas id="partitionU" class="partition"></canvas>
+        <canvas id="partitionV" class="partition"></canvas>
+        <p class="muted">The basis functions N<sub>i,3</sub>(u) and N<sub>j,3</sub>(v). At every parameter value only
+          4 of them are not 0 (thick), and their values always add up to 1 (bar Σ). Drag in a plot to move u or v.
+          Weights do not change these curves.</p>
       </details>
     </section>
 

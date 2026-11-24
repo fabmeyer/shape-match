@@ -7,6 +7,7 @@ struct Camera {
 };
 
 @group(0) @binding(0) var<uniform> camera : Camera;
+@group(0) @binding(1) var<uniform> surfaceColor : vec4f; // blue for the learner, orange for the target
 
 struct VertexOut {
   @builtin(position) position : vec4f,
@@ -38,6 +39,6 @@ fn fs_main(in : VertexOut) -> @location(0) vec4f {
   let halfway = normalize(light + toEye);
   let specular = 0.25 * pow(max(dot(n, halfway), 0.0), 40.0);
 
-  let base = vec3f(0.45, 0.55, 0.75);
+  let base = surfaceColor.rgb;
   return vec4f(base * (0.3 + 0.7 * diffuse) + specular, 1.0);
 }

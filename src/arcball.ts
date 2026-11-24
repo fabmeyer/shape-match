@@ -1,14 +1,28 @@
 import { mat4, quat, vec3, type Mat4, type Quat, type Vec3 } from 'wgpu-matrix';
 
+// perspective: free arcball view; the others look straight along an axis, without perspective
+export type ViewName = 'perspective' | 'top' | 'front' | 'side';
+
+// camera orientations of the straight-on views (camera space looks down -z with +y up)
+const STRAIGHT_VIEWS: Record<Exclude<ViewName, 'perspective'>, () => Quat> = {
+  top: () => quat.identity(),                                 // looks down -z: x right, y up
+  front: () => quat.fromAxisAngle([1, 0, 0], Math.PI / 2),    // looks along +y: x right, z up
+  side: () => quat.multiply(                                  // looks along -x: y right, z up
+    quat.fromAxisAngle([0, 0, 1], Math.PI / 2), quat.fromAxisAngle([1, 0, 0], Math.PI / 2)),
+};
+
 export class ArcballCamera {
   target: Vec3;
   distance: number;
   orientation: Quat;
   fovY = Math.PI / 4;
   enabled = true;
+  view: ViewName = 'perspective';
+  onViewChange: (view: ViewName) => void = () => {}; // e.g. rotating leaves a straight-on view
 
   private dragging = false;
   private last: Vec3 = vec3.create();
+  private perspectiveOrientation: Quat = quat.identity(); // to come back to the last free view
 
   constructor(canvas: HTMLCanvasElement, opts: { target?: number[]; distance?: number; orientation?: Quat } = {}) {
     this.target = vec3.fromValues(...((opts.target ?? [0, 0, 0]) as [number, number, number]));
@@ -23,6 +37,11 @@ export class ArcballCamera {
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!this.dragging) return;
+      // rotating a straight-on view turns it into a free (perspective) view, starting from where it is
+      if (this.view !== 'perspective') {
+        this.view = 'perspective';
+        this.onViewChange(this.view);
+      }
       const next = this.toBall(canvas, e);
       this.rotate(this.last, next);
       this.last = next;
@@ -54,6 +73,13 @@ export class ArcballCamera {
     this.orientation = quat.normalize(quat.multiply(this.orientation, delta));
   }
 
+  setView(view: ViewName): void {
+    if (view === this.view) return;
+    if (this.view === 'perspective') this.perspectiveOrientation = this.orientation;
+    this.orientation = view === 'perspective' ? this.perspectiveOrientation : STRAIGHT_VIEWS[view]();
+    this.view = view;
+  }
+
   get eye(): Vec3 {
     const back = vec3.transformQuat([0, 0, this.distance], this.orientation);
     return vec3.add(this.target, back);
@@ -62,7 +88,15 @@ export class ArcballCamera {
   viewProjection(aspect: number): Mat4 {
     const up = vec3.transformQuat([0, 1, 0], this.orientation);
     const view = mat4.lookAt(this.eye, this.target, up);
-    const proj = mat4.perspective(this.fovY, aspect, 0.05, 100);
+    let proj: Mat4;
+    if (this.view === 'perspective') {
+      proj = mat4.perspective(this.fovY, aspect, 0.05, 100);
+    } else {
+      // same visible height at the target as the perspective view, so switching keeps the zoom;
+      // near < 0: nothing is cut off when zoomed in close
+      const h = this.distance * Math.tan(this.fovY / 2);
+      proj = mat4.ortho(-h * aspect, h * aspect, -h, h, -50, 100);
+    }
     return mat4.multiply(proj, view);
   }
 }

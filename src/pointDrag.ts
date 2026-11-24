@@ -195,15 +195,16 @@ export class PointDragger {
     return this.camera.viewProjection(this.canvas.width / this.canvas.height);
   }
 
-  // position on the canvas in CSS pixels, or null if the point is behind the camera
-  private toScreen(p: Point3): [number, number] | null {
+  // position on the canvas in CSS pixels and depth (0 = near), or null if the point is behind the camera
+  private toScreen(p: Point3): [number, number, number] | null {
     const m = this.viewProjection();
     const cx = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
     const cy = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+    const cz = m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14];
     const cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
     if (cw <= 0) return null;
     const r = this.canvas.getBoundingClientRect();
-    return [(cx / cw * 0.5 + 0.5) * r.width, (0.5 - cy / cw * 0.5) * r.height];
+    return [(cx / cw * 0.5 + 0.5) * r.width, (0.5 - cy / cw * 0.5) * r.height, cz / cw];
   }
 
   private mouse(e: PointerEvent): [number, number] {
@@ -217,12 +218,16 @@ export class PointDragger {
     const count = this.net.countU * this.net.countV;
     let best = -1;
     let bestDist = PICK_RADIUS_PX;
+    let bestDepth = Infinity;
     for (let k = 0; k < count; k++) {
       const s = this.toScreen(getPoint(this.net, k));
       if (!s) continue;
       const d = Math.hypot(s[0] - mx, s[1] - my);
-      if (d < bestDist) {
+      // closer to the mouse wins; points (almost) on top of each other on screen: the front one wins
+      const tie = Math.abs(d - bestDist) < 1;
+      if ((d < bestDist && !tie) || (tie && d < PICK_RADIUS_PX && s[2] < bestDepth)) {
         bestDist = d;
+        bestDepth = s[2];
         best = k;
       }
     }

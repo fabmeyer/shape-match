@@ -47,10 +47,13 @@ export interface SurfaceEval {
   Nu: number[];    // N_{spanU-p+k, p}(u), k = 0..p
   Nv: number[];    // N_{spanV-q+l, q}(v), l = 0..q
   R: number[][];   // R[l][k]: rational basis function of control point (spanU-p+k, spanV-q+l), all add up to 1
+  walkers: number[][]; // stage a: walkers[l] = sum over k of Nu[k] * Pw of row spanV-q+l, homogeneous (w*x, w*y, w*z, w)
   point: Point3;   // S(u, v)
 }
 
-// A4.3, plus the share R of every active control point
+// A4.3 in its two stages (the two loops of the compute shader), plus the share R of every active control point
+//   stage a, along u: one walker per active row of control points
+//   stage b, along v: the walkers weighted with Nv give S(u, v)
 export function evaluate(net: ControlNet, u: number, v: number): SurfaceEval {
   const { p, q, countU, countV, knotsU, knotsV, points } = net;
   const spanU = findSpan(countU - 1, p, u, knotsU);
@@ -60,16 +63,19 @@ export function evaluate(net: ControlNet, u: number, v: number): SurfaceEval {
 
   const Sw = [0, 0, 0, 0];
   const R: number[][] = [];
+  const walkers: number[][] = [];
   for (let l = 0; l <= q; l++) {
     R.push([]);
+    const walker = [0, 0, 0, 0]; // stage a for row spanV - q + l (the inner loop)
     for (let k = 0; k <= p; k++) {
       const idx = ((spanV - q + l) * countU + spanU - p + k) * 4;
-      const b = Nu[k] * Nv[l];
-      for (let c = 0; c < 4; c++) Sw[c] += b * points[idx + c];
-      R[l].push(b * points[idx + 3]); // N_i * N_j * w_ij, divided by the weight sum below
+      for (let c = 0; c < 4; c++) walker[c] += Nu[k] * points[idx + c];
+      R[l].push(Nu[k] * Nv[l] * points[idx + 3]); // N_i * N_j * w_ij, divided by the weight sum below
     }
+    walkers.push(walker);
+    for (let c = 0; c < 4; c++) Sw[c] += Nv[l] * walker[c]; // stage b (the outer loop)
   }
   for (const row of R) for (let k = 0; k <= p; k++) row[k] /= Sw[3];
 
-  return { u, v, spanU, spanV, Nu, Nv, R, point: [Sw[0] / Sw[3], Sw[1] / Sw[3], Sw[2] / Sw[3]] };
+  return { u, v, spanU, spanV, Nu, Nv, R, walkers, point: [Sw[0] / Sw[3], Sw[1] / Sw[3], Sw[2] / Sw[3]] };
 }

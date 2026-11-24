@@ -15,6 +15,8 @@ struct Camera {
 const SELECTED : u32 = 1u; // part of the selection
 const ACTIVE   : u32 = 2u; // influences the surface at the current (u, v)
 const MARKER   : u32 = 4u; // not a control point: the surface point S(u, v)
+const WALKER   : u32 = 8u; // not a control point: a walker on a row curve that counts at v
+const FAINT    : u32 = 16u; // a walker on a row that does not count at v
 
 const RADIUS_PX : f32 = 6.0;
 const SELECTED_RADIUS_PX : f32 = 9.0;
@@ -55,6 +57,8 @@ fn fs_main(in : VertexOut) -> @location(0) vec4f {
   var fill = vec3f(1.0, 0.6, 0.2);                                         // orange: normal
   if ((in.flag & SELECTED) != 0u) { fill = vec3f(1.0, 0.95, 0.4); }       // yellow: selected
   if ((in.flag & MARKER) != 0u) { fill = vec3f(1.0, 0.25, 0.75); }        // pink: S(u, v)
+  if ((in.flag & WALKER) != 0u) { fill = vec3f(0.31, 0.84, 0.54); }       // green: walker
+  if ((in.flag & FAINT) != 0u) { fill = vec3f(0.2, 0.42, 0.3); }          // dark green: walker that does not count
 
   var rimColor = vec3f(0.1);
   if ((in.flag & ACTIVE) != 0u) { rimColor = vec3f(0.3, 0.9, 1.0); }      // cyan ring: active at (u, v)

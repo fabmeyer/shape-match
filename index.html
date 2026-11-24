@@ -5,13 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Shape Match</title>
   <style>
-    html, body { margin: 0; height: 100%; background: #111; font: 14px system-ui, sans-serif; }
-    canvas { width: 100%; height: 100%; display: block; touch-action: none; }
-    canvas[data-mode="rotate"] { cursor: grab; }
-    canvas[data-mode="rotate"]:active { cursor: grabbing; }
-    canvas[data-mode="select"] { cursor: crosshair; }
+    html, body { margin: 0; height: 100%; background: #111; color: #e6e8ec; font: 14px system-ui, sans-serif; }
+    body { display: flex; }
+    [hidden] { display: none !important; }
 
-    #toolbar { position: fixed; top: 12px; left: 12px; display: flex; gap: 8px; }
+    #gpuCanvas { flex: 1; min-width: 0; height: 100%; display: block; touch-action: none; }
+    #gpuCanvas[data-mode="rotate"] { cursor: grab; }
+    #gpuCanvas[data-mode="rotate"]:active { cursor: grabbing; }
+    #gpuCanvas[data-mode="select"] { cursor: crosshair; }
+
+    #toolbar { position: fixed; top: 12px; left: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .group {
       display: flex; padding: 3px; gap: 3px;
       background: #1e2027; border: 1px solid #333844; border-radius: 8px;
@@ -20,8 +23,76 @@
       padding: 6px 12px; border: 0; border-radius: 5px;
       background: transparent; color: #c9ccd3; font: inherit; cursor: pointer;
     }
-    #toolbar button:hover { background: #2a2e38; }
-    #mode button[aria-pressed="true"] { background: #4a7bd0; color: #fff; }
+    #toolbar button:hover:not(:disabled) { background: #2a2e38; }
+    #toolbar button:disabled { color: #5c606b; cursor: default; }
+    #toolbar button[aria-pressed="true"] { background: #4a7bd0; color: #fff; }
+
+    /* round icon button */
+    #toolbar .icon-button {
+      width: 34px; height: 34px; padding: 0; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 50%; border: 1px solid #4a4f5c; background: #2a2e38; color: #e6e8ec;
+    }
+    #toolbar .icon-button:hover:not(:disabled) { background: #3a3f4b; border-color: #6b7280; }
+    #toolbar .icon-button:active:not(:disabled) { background: #4a7bd0; border-color: #4a7bd0; }
+    #toolbar .icon-button:disabled { background: transparent; border-color: #333844; color: #5c606b; }
+    #toolbar .icon-button:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+    .icon-button svg { width: 18px; height: 18px; }
+
+    /* on/off switch: a checkbox styled as a sliding toggle */
+    .switch { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 8px; color: #c9ccd3; cursor: pointer; user-select: none; }
+    .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+    .switch .track {
+      position: relative; width: 30px; height: 17px; flex: none;
+      background: #3a3f4b; border-radius: 9px; transition: background 0.15s;
+    }
+    .switch .track::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+      background: #fff; border-radius: 50%; transition: transform 0.15s;
+    }
+    .switch input:checked + .track { background: #4a7bd0; }
+    .switch input:checked + .track::after { transform: translateX(13px); }
+    .switch input:focus-visible + .track { outline: 2px solid #8ab4f8; outline-offset: 2px; }
+
+    #side {
+      width: 330px; flex: none; box-sizing: border-box; padding: 4px 16px 16px;
+      background: #16181d; border-left: 1px solid #333844; overflow-y: auto;
+    }
+    #side section { padding: 12px 0; border-bottom: 1px solid #2a2e38; }
+    #side h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #9aa0aa; }
+    #side p { margin: 6px 0; }
+    .muted { color: #9aa0aa; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .row input[type="range"] { flex: 1; min-width: 0; }
+    .row input[type="number"] {
+      width: 4.5em; padding: 3px 4px; background: #1e2027; color: inherit;
+      border: 1px solid #333844; border-radius: 4px; font: inherit;
+    }
+    #uvCanvas { width: 100%; aspect-ratio: 1; display: block; touch-action: none; cursor: crosshair; }
+
+    math { font-size: 15px; }
+    #mathPanel math[display="block"] { margin: 10px 0; }
+    #mathPanel details.inner { margin: 8px 0; overflow-x: auto; }
+    #mathPanel details.inner summary { cursor: pointer; color: #9aa0aa; }
+
+    /* sections that can be collapsed: the header is the <summary> of a <details> */
+    #side details.section > summary {
+      display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; user-select: none;
+      margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #9aa0aa;
+    }
+    #side details.section > summary::-webkit-details-marker { display: none; }
+    #side details.section > summary::before {
+      content: ""; width: 6px; height: 6px; flex: none; margin: 0 3px 0 1px;
+      border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+      transform: rotate(-45deg); transition: transform 0.15s;   /* points right when collapsed */
+    }
+    #side details.section[open] > summary::before { transform: rotate(45deg); }  /* points down when open */
+    #side details.section > summary:hover { color: #e6e8ec; }
+    #side details.section:not([open]) > summary { margin-bottom: 0; }
+    #mathValues .value { display: inline-block; margin: 0 10px 2px 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    #mathValues table { border-collapse: collapse; margin: 6px 0; font-variant-numeric: tabular-nums; }
+    #mathValues th { padding: 3px 6px; font-weight: 400; color: #9aa0aa; font-size: 12px; text-align: right; }
+    #mathValues td { padding: 3px 8px; border: 1px solid #333844; text-align: right; }
   </style>
 </head>
 <body>
@@ -30,12 +101,122 @@
   <div id="toolbar">
     <div id="mode" class="group" role="group" aria-label="Mouse mode">
       <button data-mode="rotate" aria-pressed="true" title="Drag to rotate the view">Rotate</button>
-      <button data-mode="select" aria-pressed="false" title="Click a point, drag to change its height">Move points</button>
+      <button data-mode="select" aria-pressed="false" title="Click or drag a rectangle to select control points, drag an arrow to move them">Select</button>
+    </div>
+    <button id="undo" class="icon-button" title="Undo the last change (Ctrl+Z)" aria-label="Undo" disabled>
+      <!-- arrow turning back to the left -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 14 4 9l5-5"/>
+        <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>
+      </svg>
+    </button>
+    <div class="group">
+      <button id="reset" title="Put all control points back to the start">Reset points</button>
     </div>
     <div class="group">
-      <button id="reset" title="Move all control points back to the plane">Reset points</button>
+      <label class="switch" title="Dashed lines between neighbouring control points">
+        <input id="togglePolygon" type="checkbox" role="switch" checked>
+        <span class="track"></span>
+        Polygon
+      </label>
     </div>
   </div>
+
+  <aside id="side">
+    <section>
+      <h2>Control points</h2>
+      <p id="selectionInfo" class="muted"></p>
+      <label class="row">
+        Weight w
+        <input id="weight" type="range" min="0.1" max="5" step="0.05" value="1" disabled>
+        <input id="weightNumber" type="number" min="0.1" max="5" step="0.05" value="1" disabled aria-label="Weight">
+      </label>
+    </section>
+
+    <section>
+      <details id="paramPanel" class="section" open>
+      <summary>Parameter space</summary>
+      <canvas id="uvCanvas"></canvas>
+      <p class="muted">Drag the pink dot. Lines are knots. The pink dot on the surface is S(u, v);
+        control points with a cyan ring influence it.</p>
+      </details>
+    </section>
+
+    <section>
+      <details id="mathPanel" class="section">
+      <summary>Formulas</summary>
+      <p class="muted">A surface point is a weighted average of the control points P<sub>i,j</sub>:</p>
+      <math display="block">
+        <mi>S</mi><mo stretchy="false">(</mo><mi>u</mi><mo>,</mo><mi>v</mi><mo stretchy="false">)</mo><mo>=</mo>
+        <munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>0</mn></mrow><mi>n</mi></munderover>
+        <munderover><mo>∑</mo><mrow><mi>j</mi><mo>=</mo><mn>0</mn></mrow><mi>m</mi></munderover>
+        <msub><mi>R</mi><mrow><mi>i</mi><mo>,</mo><mi>j</mi></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo>,</mo><mi>v</mi><mo stretchy="false">)</mo>
+        <mspace width="0.2em"></mspace>
+        <msub><mi>P</mi><mrow><mi>i</mi><mo>,</mo><mi>j</mi></mrow></msub>
+      </math>
+      <p class="muted">The share R<sub>i,j</sub> of a control point comes from the basis functions and its weight w<sub>i,j</sub>:</p>
+      <math display="block">
+        <msub><mi>R</mi><mrow><mi>i</mi><mo>,</mo><mi>j</mi></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo>,</mo><mi>v</mi><mo stretchy="false">)</mo><mo>=</mo>
+        <mfrac>
+          <mrow>
+            <msub><mi>N</mi><mrow><mi>i</mi><mo>,</mo><mi>p</mi></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo>
+            <mspace width="0.2em"></mspace>
+            <msub><mi>N</mi><mrow><mi>j</mi><mo>,</mo><mi>q</mi></mrow></msub><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo>
+            <mspace width="0.2em"></mspace>
+            <msub><mi>w</mi><mrow><mi>i</mi><mo>,</mo><mi>j</mi></mrow></msub>
+          </mrow>
+          <mrow>
+            <munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><mi>n</mi></munderover>
+            <munderover><mo>∑</mo><mrow><mi>l</mi><mo>=</mo><mn>0</mn></mrow><mi>m</mi></munderover>
+            <msub><mi>N</mi><mrow><mi>k</mi><mo>,</mo><mi>p</mi></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo>
+            <mspace width="0.2em"></mspace>
+            <msub><mi>N</mi><mrow><mi>l</mi><mo>,</mo><mi>q</mi></mrow></msub><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo>
+            <mspace width="0.2em"></mspace>
+            <msub><mi>w</mi><mrow><mi>k</mi><mo>,</mo><mi>l</mi></mrow></msub>
+          </mrow>
+        </mfrac>
+      </math>
+      <details class="inner">
+        <summary>Basis functions N (recursion over the degree)</summary>
+        <math display="block">
+          <msub><mi>N</mi><mrow><mi>i</mi><mo>,</mo><mn>0</mn></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo><mo>=</mo>
+          <mrow><mo>{</mo>
+            <mtable columnalign="left left">
+              <mtr><mtd><mn>1</mn></mtd><mtd><mtext>if&#160;&#160;</mtext><msub><mi>u</mi><mi>i</mi></msub><mo>≤</mo><mi>u</mi><mo>&lt;</mo><msub><mi>u</mi><mrow><mi>i</mi><mo>+</mo><mn>1</mn></mrow></msub></mtd></mtr>
+              <mtr><mtd><mn>0</mn></mtd><mtd><mtext>otherwise</mtext></mtd></mtr>
+            </mtable>
+          </mrow>
+        </math>
+        <math display="block">
+          <mtable columnalign="right left" displaystyle="true">
+            <mtr>
+              <mtd><msub><mi>N</mi><mrow><mi>i</mi><mo>,</mo><mi>p</mi></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo><mo>=</mo></mtd>
+              <mtd>
+                <mfrac>
+                  <mrow><mi>u</mi><mo>−</mo><msub><mi>u</mi><mi>i</mi></msub></mrow>
+                  <mrow><msub><mi>u</mi><mrow><mi>i</mi><mo>+</mo><mi>p</mi></mrow></msub><mo>−</mo><msub><mi>u</mi><mi>i</mi></msub></mrow>
+                </mfrac>
+                <msub><mi>N</mi><mrow><mi>i</mi><mo>,</mo><mi>p</mi><mo>−</mo><mn>1</mn></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo>
+              </mtd>
+            </mtr>
+            <mtr>
+              <mtd><mo>+</mo></mtd>
+              <mtd>
+                <mfrac>
+                  <mrow><msub><mi>u</mi><mrow><mi>i</mi><mo>+</mo><mi>p</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><mi>u</mi></mrow>
+                  <mrow><msub><mi>u</mi><mrow><mi>i</mi><mo>+</mo><mi>p</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>u</mi><mrow><mi>i</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow>
+                </mfrac>
+                <msub><mi>N</mi><mrow><mi>i</mi><mo>+</mo><mn>1</mn><mo>,</mo><mi>p</mi><mo>−</mo><mn>1</mn></mrow></msub><mo stretchy="false">(</mo><mi>u</mi><mo stretchy="false">)</mo>
+              </mtd>
+            </mtr>
+          </mtable>
+        </math>
+        <p class="muted">u<sub>i</sub> are the knots. A fraction with denominator 0 counts as 0.</p>
+      </details>
+      <div id="mathValues"></div>
+      </details>
+    </section>
+  </aside>
 
   <script type="module" src="./src/main.ts"></script>
 </body>

@@ -114,6 +114,27 @@ export class ArcballCamera {
     }
   }
 
+  // the camera for the shaders in homogeneous coordinates:
+  //   perspective:  its position (x, y, z, 1), every point sees it from another direction
+  //   straight-on:  a direction (x, y, z, 0), the camera is infinitely far away (orthographic),
+  //                 so every point sees it from the same direction
+  get eyeHomogeneous(): [number, number, number, number] {
+    if (this.view === 'perspective') {
+      const e = this.eye;
+      return [e[0], e[1], e[2], 1];
+    }
+    const back = vec3.transformQuat([0, 0, 1], this.orientation);
+    return [back[0], back[1], back[2], 0];
+  }
+
+  // how big something at this point appears depends on this distance: the distance to the eye in
+  // perspective, the same for every point when orthographic (the ortho window matches it at the target)
+  viewDistance(point: ArrayLike<number>): number {
+    if (this.view !== 'perspective') return this.distance;
+    const e = this.eye;
+    return Math.hypot(e[0] - point[0], e[1] - point[1], e[2] - point[2]);
+  }
+
   get eye(): Vec3 {
     const back = vec3.transformQuat([0, 0, this.distance], this.orientation);
     return vec3.add(this.target, back);

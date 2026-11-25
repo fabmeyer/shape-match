@@ -2,7 +2,7 @@
 
 struct Camera {
   viewProjection : mat4x4f,
-  eye            : vec4f,
+  eye            : vec4f, // w = 1: position (perspective); w = 0: direction to the camera (orthographic)
   viewport       : vec4f,
 };
 
@@ -14,6 +14,12 @@ struct VertexOut {
   @location(0) world : vec3f,
   @location(1) normal : vec3f,
 };
+
+// direction from p to the camera: the same for every point when the camera is orthographic
+fn toCamera(p : vec3f) -> vec3f {
+  if (camera.eye.w == 0.0) { return normalize(camera.eye.xyz); }
+  return normalize(camera.eye.xyz - p);
+}
 
 @vertex
 fn vs_main(@location(0) position : vec4f, @location(1) normal : vec4f) -> VertexOut {
@@ -28,7 +34,7 @@ fn vs_main(@location(0) position : vec4f, @location(1) normal : vec4f) -> Vertex
 fn fs_main(in : VertexOut) -> @location(0) vec4f {
   // interpolation between the vertices shortens the normal: make it length 1 again
   var n = normalize(in.normal);
-  let toEye = normalize(camera.eye.xyz - in.world);
+  let toEye = toCamera(in.world);
   if (dot(n, toEye) < 0.0) { n = -n; } // lit from both sides
 
   // light near the camera, a bit from above (like a lamp on the camera)

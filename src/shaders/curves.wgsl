@@ -4,7 +4,7 @@
 
 struct Camera {
   viewProjection : mat4x4f,
-  eye            : vec4f,
+  eye            : vec4f, // w = 1: position (perspective); w = 0: direction to the camera (orthographic)
   viewport       : vec4f, // width, height in pixels
 };
 
@@ -29,8 +29,14 @@ struct VertexOut {
   @location(2) @interpolate(flat) color : vec3f,
 };
 
+// direction from p to the camera: the same for every point when the camera is orthographic
+fn toCamera(p : vec3f) -> vec3f {
+  if (camera.eye.w == 0.0) { return normalize(camera.eye.xyz); }
+  return normalize(camera.eye.xyz - p);
+}
+
 fn toClip(p : vec3f) -> vec4f {
-  let toEye = normalize(camera.eye.xyz - p);
+  let toEye = toCamera(p);
   return camera.viewProjection * vec4f(p + toEye * LIFT, 1.0);
 }
 

@@ -632,7 +632,7 @@ function frame() {
   const learnerGpu = learner!;
   const targetGpu = target!;
   cameraData.set(camera.viewProjection(canvas.width / canvas.height), 0);
-  cameraData.set([...camera.eye, 1], 16);
+  cameraData.set(camera.eyeHomogeneous, 16); // w = 0 in the straight-on views: orthographic
   cameraData.set([canvas.width, canvas.height, 0, 0], 20);
   device.queue.writeBuffer(cameraBuffer, 0, cameraData);
 

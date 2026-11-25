@@ -277,6 +277,7 @@ let walkerPointsBindGroup: GPUBindGroup | undefined;
 
 type Mode = 'rotate' | 'select';
 let mode: Mode = 'rotate';
+let showPoints = true;    // the learner's control points and their stems
 let showPolygon = true;
 let showMath = false;  // formula section expanded
 let showSolution = false; // control points of the target
@@ -418,7 +419,7 @@ function updateWeightPanel() {
   if (selected.length === 0) {
     selectionInfo.textContent = mode === 'select'
       ? 'Click a control point. Shift+click adds one, dragging on empty space selects with a rectangle.'
-      : 'Switch to Select to pick control points.';
+      : showPoints ? 'Switch to Select to pick control points.' : 'Switch Points on to pick control points.';
     weightSlider.value = '1';
     weightNumber.value = '';
     return;
@@ -540,6 +541,7 @@ loadTask(task);
 const modeButtons = document.querySelectorAll<HTMLButtonElement>('#mode button');
 
 function setMode(next: Mode) {
+  if (next === 'select' && !showPoints) return; // hidden points can't be picked
   mode = next;
   camera.enabled = mode === 'rotate';
   dragger.enabled = mode === 'select';
@@ -561,6 +563,16 @@ viewButtons.forEach((b) => b.addEventListener('click', () => {
 }));
 camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
 setMode('rotate');
+
+// hiding the points also leaves Select mode: points you can't see can't be picked
+const pointsSwitch = document.getElementById('togglePoints') as HTMLInputElement;
+const selectButton = document.querySelector<HTMLButtonElement>('#mode button[data-mode="select"]')!;
+pointsSwitch.addEventListener('change', () => {
+  showPoints = pointsSwitch.checked;
+  selectButton.disabled = !showPoints;
+  if (!showPoints) setMode('rotate');
+  updateWeightPanel();
+});
 
 // the control polygon has an on/off switch (a checkbox) instead of a button
 const polygonSwitch = document.getElementById('togglePolygon') as HTMLInputElement;
@@ -648,7 +660,7 @@ function frame() {
     pass.draw(6, walkerSegmentCount);
   }
 
-  learnerGpu.drawStems(pass);
+  if (showPoints) learnerGpu.drawStems(pass);
   if (showPolygon) learnerGpu.drawPolygon(pass);
 
   if (showSolution) {
@@ -656,8 +668,10 @@ function frame() {
     targetGpu.drawPoints(pass);
   }
 
-  learnerGpu.drawPoints(pass); // leaves the points pipeline set for the walkers and the marker
+  if (showPoints) learnerGpu.drawPoints(pass);
 
+  // the walkers and the marker are drawn like control points
+  pass.setPipeline(pointsPipeline);
   if (showWalkers) {
     pass.setBindGroup(0, walkerPointsBindGroup!);
     pass.draw(6, net.countV);

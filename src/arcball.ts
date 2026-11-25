@@ -23,11 +23,13 @@ export class ArcballCamera {
   private dragging = false;
   private last: Vec3 = vec3.create();
   private perspectiveOrientation: Quat = quat.identity(); // to come back to the last free view
+  private home: { target: Vec3; orientation: Quat }; // the starting view, for reset()
 
   constructor(canvas: HTMLCanvasElement, opts: { target?: number[]; distance?: number; orientation?: Quat } = {}) {
     this.target = vec3.fromValues(...((opts.target ?? [0, 0, 0]) as [number, number, number]));
     this.distance = opts.distance ?? 5;
     this.orientation = opts.orientation ?? quat.identity();
+    this.home = { target: vec3.clone(this.target), orientation: quat.clone(this.orientation) };
 
     canvas.addEventListener('pointerdown', (e) => {
       if (!this.enabled) return;
@@ -78,6 +80,19 @@ export class ArcballCamera {
     if (this.view === 'perspective') this.perspectiveOrientation = this.orientation;
     this.orientation = view === 'perspective' ? this.perspectiveOrientation : STRAIGHT_VIEWS[view]();
     this.view = view;
+  }
+
+  // back to the starting perspective view: its angle and target, at the given distance
+  // (the caller picks the distance, so both surfaces fit the window as it is now)
+  reset(distance: number): void {
+    this.target = vec3.clone(this.home.target);
+    this.orientation = quat.clone(this.home.orientation);
+    this.perspectiveOrientation = quat.clone(this.home.orientation);
+    this.distance = distance;
+    if (this.view !== 'perspective') {
+      this.view = 'perspective';
+      this.onViewChange(this.view);
+    }
   }
 
   get eye(): Vec3 {

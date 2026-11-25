@@ -162,6 +162,14 @@
       <button data-view="front" aria-pressed="false" title="Straight from the front, onto the xz-plane">Front</button>
       <button data-view="side" aria-pressed="false" title="Straight from the side, onto the yz-plane">Side</button>
     </div>
+    <button id="resetView" class="icon-button" title="Reset the view: back to the starting angle and zoom" aria-label="Reset view">
+      <!-- a camera frame with a circular arrow: back to the start -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7"/>
+        <path d="M3 4v5h5"/>
+        <circle cx="12" cy="12" r="2.5"/>
+      </svg>
+    </button>
     <button id="undo" class="icon-button" title="Undo the last change (Ctrl+Z)" aria-label="Undo" disabled>
       <!-- arrow turning back to the left -->
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

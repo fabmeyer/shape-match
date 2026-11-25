@@ -581,6 +581,7 @@ viewButtons.forEach((b) => b.addEventListener('click', () => {
   showView(camera.view);
 }));
 camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
+document.getElementById('resetView')!.addEventListener('click', () => camera.reset(startDistance()));
 setMode('rotate');
 
 // hiding the points also leaves Select mode: points you can't see can't be picked

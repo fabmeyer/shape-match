@@ -1,6 +1,6 @@
 import { quat } from 'wgpu-matrix';
 import { initWebGPU } from './webgpu-init.ts';
-import { ArcballCamera, type ViewName } from './arcball.ts';
+import { ArcballCamera, VIEW_LABELS, type ViewName } from './arcball.ts';
 import { getPoint, getWeight, setWeight, type ControlNet } from './controlNet.ts';
 import { PointDragger } from './pointDrag.ts';
 import { History } from './history.ts';
@@ -498,7 +498,7 @@ async function copyDebugReport() {
     learner: netToData(net),
     state: {
       mode,
-      camera: { view: camera.view, target: [...camera.target], distance: camera.distance, orientation: [...camera.orientation] },
+      camera: { view: camera.view, flipped: camera.flipped, target: [...camera.target], distance: camera.distance, orientation: [...camera.orientation] },
       switches: { showPoints, showPolygon, showSolution, showWalkers, showMarker, showHeatmap },
       errorGrid: grader.resolution,
       calibration: lastMeasurement?.calibration,
@@ -697,14 +697,27 @@ function setMode(next: Mode) {
 modeButtons.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode as Mode)));
 
 // views: perspective, or straight along an axis (top = xy-plane, front = xz-plane, side = yz-plane)
+// Flip looks at a straight-on view from the opposite side (Bottom, Back, Other side): when one surface
+// hides the other, flipping shows the one behind
 const viewButtons = document.querySelectorAll<HTMLButtonElement>('#view button');
+const flipButton = document.getElementById('flipView') as HTMLButtonElement;
 function showView(view: ViewName) {
-  viewButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+  viewButtons.forEach((b) => {
+    const name = b.dataset.view as ViewName;
+    b.setAttribute('aria-pressed', String(name === view));
+    if (name !== 'perspective') b.textContent = VIEW_LABELS[name][name === view && camera.flipped ? 1 : 0];
+  });
+  flipButton.disabled = view === 'perspective';
+  flipButton.setAttribute('aria-pressed', String(camera.flipped));
 }
 viewButtons.forEach((b) => b.addEventListener('click', () => {
   camera.setView(b.dataset.view as ViewName);
   showView(camera.view);
 }));
+flipButton.addEventListener('click', () => {
+  camera.flip();
+  showView(camera.view);
+});
 camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
 document.getElementById('resetView')!.addEventListener('click', () => camera.reset(startDistance()));
 setMode('rotate');

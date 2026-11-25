@@ -39,6 +39,7 @@
     }
     #toolbar .icon-button:hover:not(:disabled) { background: #3a3f4b; border-color: #6b7280; }
     #toolbar .icon-button:active:not(:disabled) { background: #4a7bd0; border-color: #4a7bd0; }
+    #toolbar .icon-button[aria-pressed="true"] { background: #4a7bd0; border-color: #4a7bd0; color: #fff; }
     #toolbar .icon-button:disabled { background: transparent; border-color: #333844; color: #5c606b; }
     #toolbar .icon-button:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
     .icon-button svg { width: 18px; height: 18px; }
@@ -166,6 +167,17 @@
       <button data-view="front" aria-pressed="false" title="Straight from the front, onto the xz-plane">Front</button>
       <button data-view="side" aria-pressed="false" title="Straight from the side, onto the yz-plane">Side</button>
     </div>
+    <button id="flipView" class="icon-button" aria-pressed="false" disabled
+      title="Flip the view: look from the opposite side (Top ↔ Bottom, Front ↔ Back). Shows a surface hidden behind the other" aria-label="Flip the view">
+      <!-- two arrows turning around a vertical axis: look from the other side -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3v18"/>
+        <path d="M8 7H4l3-3"/>
+        <path d="M4 7c0 3 2 4 4 4"/>
+        <path d="M16 17h4l-3 3"/>
+        <path d="M20 17c0-3-2-4-4-4"/>
+      </svg>
+    </button>
     <button id="resetView" class="icon-button" title="Reset the view: back to the starting angle and zoom" aria-label="Reset view">
       <!-- a camera frame with a circular arrow: back to the start -->
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

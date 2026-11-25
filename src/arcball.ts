@@ -11,6 +11,21 @@ const STRAIGHT_VIEWS: Record<Exclude<ViewName, 'perspective'>, () => Quat> = {
     quat.fromAxisAngle([0, 0, 1], Math.PI / 2), quat.fromAxisAngle([1, 0, 0], Math.PI / 2)),
 };
 
+// the names of the straight-on views, and of the same view seen from the opposite side
+export const VIEW_LABELS: Record<Exclude<ViewName, 'perspective'>, [string, string]> = {
+  top: ['Top', 'Bottom'],
+  front: ['Front', 'Back'],
+  side: ['Side', 'Other side'],
+};
+
+// the camera orientation of a straight-on view; flipped = from the opposite side: half a turn around the
+// screen's up direction, so up stays up and only left and right change (one surface can hide the
+// other in a straight-on view; flipping shows the one behind)
+export function straightOrientation(view: Exclude<ViewName, 'perspective'>, flipped: boolean): Quat {
+  const q = STRAIGHT_VIEWS[view]();
+  return flipped ? quat.normalize(quat.multiply(q, quat.fromAxisAngle([0, 1, 0], Math.PI))) : q;
+}
+
 export class ArcballCamera {
   target: Vec3;
   distance: number;
@@ -20,6 +35,7 @@ export class ArcballCamera {
   // what dragging does: turn the view around the target, or move it (target and eye together) in the view plane
   drag: 'rotate' | 'move' = 'rotate';
   view: ViewName = 'perspective';
+  flipped = false; // a straight-on view seen from the opposite side (Bottom, Back, Other side)
   onViewChange: (view: ViewName) => void = () => {}; // e.g. rotating leaves a straight-on view
 
   private dragging = false;
@@ -51,6 +67,7 @@ export class ArcballCamera {
       // rotating a straight-on view turns it into a free (perspective) view, starting from where it is
       if (this.view !== 'perspective') {
         this.view = 'perspective';
+        this.flipped = false;
         this.onViewChange(this.view);
       }
       const next = this.toBall(canvas, e);
@@ -94,11 +111,20 @@ export class ArcballCamera {
     this.target = vec3.add(this.target, vec3.add(vec3.scale(right, -dx * perPixel), vec3.scale(up, dy * perPixel)));
   }
 
+  // a new view always starts from its usual side
   setView(view: ViewName): void {
     if (view === this.view) return;
     if (this.view === 'perspective') this.perspectiveOrientation = this.orientation;
-    this.orientation = view === 'perspective' ? this.perspectiveOrientation : STRAIGHT_VIEWS[view]();
+    this.flipped = false;
+    this.orientation = view === 'perspective' ? this.perspectiveOrientation : straightOrientation(view, false);
     this.view = view;
+  }
+
+  // a straight-on view from the opposite side, and back; the perspective view has nothing to flip
+  flip(): void {
+    if (this.view === 'perspective') return;
+    this.flipped = !this.flipped;
+    this.orientation = straightOrientation(this.view, this.flipped);
   }
 
   // back to the starting perspective view: its angle and target, at the given distance
@@ -108,6 +134,7 @@ export class ArcballCamera {
     this.orientation = quat.clone(this.home.orientation);
     this.perspectiveOrientation = quat.clone(this.home.orientation);
     this.distance = distance;
+    this.flipped = false;
     if (this.view !== 'perspective') {
       this.view = 'perspective';
       this.onViewChange(this.view);

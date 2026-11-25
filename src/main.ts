@@ -11,6 +11,7 @@ import { updateMathPanel } from './mathPanel.ts';
 import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task } from './target.ts';
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
+import { ErrorPass, type GpuShapeDistance } from './errorPass.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
@@ -224,6 +225,37 @@ const gizmoBindGroup = device.createBindGroup({
 });
 
 // ---------------------------------------------------------
+// Shape distance: the error pass runs on its own grid, only after the net changed
+// ---------------------------------------------------------
+
+const errorPass = new ErrorPass(device, tessellatePipeline);
+let distanceDirty = true; // the net changed since the last measurement
+let measuring = false;    // a measurement is on its way back from the GPU
+const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphElement;
+const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
+errorResSelect.addEventListener('change', () => {
+  errorPass.resolution = Number(errorResSelect.value);
+  distanceDirty = true;
+});
+
+// at most one measurement at a time; changes made meanwhile are measured right after it
+function measureShapeDistance() {
+  measuring = true;
+  distanceDirty = false;
+  const start = performance.now();
+  errorPass.measure()
+    .then((d) => showShapeDistance(d, performance.now() - start))
+    .catch((e) => { distanceInfo.textContent = `Error pass failed: ${e}`; })
+    .finally(() => { measuring = false; });
+}
+
+function showShapeDistance(d: GpuShapeDistance, ms: number) {
+  const percent = (x: number, digits: number) => `${(100 * x).toFixed(digits)} %`;
+  distanceInfo.textContent = `RMS ${percent(d.rms, 3)}, Hausdorff ${percent(d.hausdorff, 2)} of the diagonal `
+    + `(error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
+}
+
+// ---------------------------------------------------------
 // The Task and the two surfaces (rebuilt by loadTask and setLearner)
 // ---------------------------------------------------------
 
@@ -290,6 +322,8 @@ function beginEdit() {
 // call after every change of the control points
 function pointsChanged() {
   learner!.uploadPoints(net.points);
+  errorPass.uploadLearnerPoints(net.points);
+  distanceDirty = true;
   updateMath();
   updateWeightPanel();
 }
@@ -434,6 +468,8 @@ function setLearner(next: ControlNet) {
   learner?.destroy();
   learner = new SurfaceGpu(device, pipelines, cameraBuffer, learnerColorBuffer, net);
   flagData = new Uint32Array(learner.pointCount);
+  errorPass.setLearner(net);
+  distanceDirty = true;
 
   walkerPointBuffer?.destroy();
   walkerFlagBuffer?.destroy();
@@ -478,6 +514,7 @@ function loadTask(next: Task) {
   target?.destroy();
   target = new SurfaceGpu(device, pipelines, cameraBuffer, targetColorBuffer, task.target,
     shiftedPoints(task.target, TARGET_OFFSET));
+  errorPass.setTarget(task.target); // unshifted: the distance compares the surfaces where they are defined
   // the target's control points (solution switch) are never selected: all flags stay 0
   setLearner(cloneNet(task.start));
 }
@@ -639,6 +676,8 @@ function frame() {
 
   pass.end();
   device.queue.submit([encoder.finish()]);
+
+  if (distanceDirty && !measuring) measureShapeDistance();
 
   requestAnimationFrame(frame);
 }

@@ -1,0 +1,181 @@
+// the Shape distance on the GPU (ADR 0002): the Learner surface and the Target on their own error grid,
+// separate from the render grid, then both directions of the distance and their sums
+//   1. tessellate.wgsl: both surfaces on the error grid (the Target only once per Level)
+//   2. distance.wgsl:   per sample, the distance to the nearest triangle of the other surface and its area
+//   3. reduce.wgsl:     per direction, sum of w * d^2, sum of w and the largest d
+// only the six sums come back to the CPU; combine() in shapeDistance.ts turns them into RMS and Hausdorff
+// shapeDistance.ts is the CPU reference: same samples, same triangles, same weights
+import type { ControlNet } from './controlNet.ts';
+import { boundingDiagonal, combine, ERROR_RES, sampleSurface, type DistanceSums } from './shapeDistance.ts';
+import { createTessellatePipeline, SurfaceGrid } from './surfaceGrid.ts';
+import distanceCode from './shaders/distance.wgsl?raw';
+import reduceCode from './shaders/reduce.wgsl?raw';
+
+const DISTANCE_WORKGROUP = 64; // @workgroup_size in distance.wgsl
+
+export interface GpuShapeDistance {
+  rms: number;       // / diagonal, like shapeDistance()
+  hausdorff: number; // / diagonal
+  diagonal: number;  // of the Target's bounding box
+  res: number;       // the error grid it was measured on
+}
+
+// one direction: from the samples of one grid to the triangles of the other
+interface Direction {
+  distances: GPUBuffer; // f32 per sample of `from`
+  weights: GPUBuffer;   // f32 per sample of `from`
+  distanceGroup: GPUBindGroup;
+  reduceGroup: GPUBindGroup;
+  sampleCount: number;
+  buffers: GPUBuffer[];
+}
+
+export class ErrorPass {
+  private device: GPUDevice;
+  private tessellatePipeline: GPUComputePipeline;
+  private distancePipeline: GPUComputePipeline;
+  private reducePipeline: GPUComputePipeline;
+  private results: GPUBuffer; // two vec4f: learner -> target, target -> learner
+
+  private res = ERROR_RES;
+  private targetNet?: ControlNet;
+  private learnerNet?: ControlNet;
+  private target?: SurfaceGrid;
+  private learner?: SurfaceGrid;
+  private diagonal = 1;
+  private directions: Direction[] = [];
+
+  constructor(device: GPUDevice, tessellatePipeline = createTessellatePipeline(device)) {
+    this.device = device;
+    this.tessellatePipeline = tessellatePipeline;
+    const pipeline = (label: string, code: string) => device.createComputePipeline({
+      label,
+      layout: 'auto',
+      compute: { module: device.createShaderModule({ label, code }), entryPoint: 'cs_main' },
+    });
+    this.distancePipeline = pipeline('distance', distanceCode);
+    this.reducePipeline = pipeline('reduce distances', reduceCode);
+    this.results = device.createBuffer({
+      label: 'distance sums',
+      size: 2 * 16,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+  }
+
+  // samples per direction of the error grid (before the knots are added); can change at any time
+  get resolution(): number {
+    return this.res;
+  }
+
+  set resolution(res: number) {
+    if (res === this.res) return;
+    this.res = res;
+    if (this.targetNet) this.setTarget(this.targetNet);
+    if (this.learnerNet) this.setLearner(this.learnerNet);
+  }
+
+  // a new Level: the Target only changes here
+  setTarget(net: ControlNet): void {
+    this.targetNet = net;
+    this.target?.destroy();
+    this.target = new SurfaceGrid(this.device, this.tessellatePipeline, net, this.res);
+    this.diagonal = boundingDiagonal(sampleSurface(net, this.res)); // same samples as the GPU grid
+    this.rebuildDirections();
+  }
+
+  // a new Learner surface, possibly with another Layout (Level load, knot insertion)
+  setLearner(net: ControlNet): void {
+    this.learnerNet = net;
+    this.learner?.destroy();
+    this.learner = new SurfaceGrid(this.device, this.tessellatePipeline, net, this.res);
+    this.rebuildDirections();
+  }
+
+  // the learner's control points changed (drag, weight, undo): same Layout, new positions
+  uploadLearnerPoints(points: Float32Array): void {
+    this.learner?.uploadPoints(points);
+  }
+
+  // per sample of the Learner surface on the error grid: its distance to the Target (for the heatmap)
+  get learnerDistances(): GPUBuffer | undefined {
+    return this.directions[0]?.distances;
+  }
+
+  // per sample of the Target on the error grid: its distance to the Learner surface
+  get targetDistances(): GPUBuffer | undefined {
+    return this.directions[1]?.distances;
+  }
+
+  private rebuildDirections(): void {
+    for (const d of this.directions) for (const b of d.buffers) b.destroy();
+    this.directions = [];
+    if (!this.learner || !this.target) return;
+    this.directions = [this.direction(this.learner, this.target, 0), this.direction(this.target, this.learner, 1)];
+  }
+
+  private direction(from: SurfaceGrid, to: SurfaceGrid, slot: number): Direction {
+    const device = this.device;
+    const { STORAGE, UNIFORM, COPY_DST, COPY_SRC } = GPUBufferUsage;
+    const count = from.sampleCount;
+    const distances = device.createBuffer({ label: 'sample distances', size: count * 4, usage: STORAGE | COPY_SRC });
+    const weights = device.createBuffer({ label: 'sample weights', size: count * 4, usage: STORAGE | COPY_SRC });
+    const distanceParams = device.createBuffer({ label: 'distance params', size: 16, usage: UNIFORM | COPY_DST });
+    device.queue.writeBuffer(distanceParams, 0, new Uint32Array([from.resU, from.resV, to.resU, to.resV]));
+    const reduceParams = device.createBuffer({ label: 'reduce params', size: 8, usage: UNIFORM | COPY_DST });
+    device.queue.writeBuffer(reduceParams, 0, new Uint32Array([count, slot]));
+
+    const group = (pipeline: GPUComputePipeline, buffers: GPUBuffer[]) => device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })),
+    });
+    return {
+      distances,
+      weights,
+      sampleCount: count,
+      distanceGroup: group(this.distancePipeline, [distanceParams, from.positions, to.positions, distances, weights]),
+      reduceGroup: group(this.reducePipeline, [reduceParams, distances, weights, this.results]),
+      buffers: [distances, weights, distanceParams, reduceParams],
+    };
+  }
+
+  // the Shape distance between the current Learner surface and the Target
+  async measure(): Promise<GpuShapeDistance> {
+    if (!this.learner || !this.target) throw new Error('ErrorPass needs a Target and a Learner surface first');
+    const device = this.device;
+    const encoder = device.createCommandEncoder({ label: 'error pass' });
+    const compute = encoder.beginComputePass({ label: 'error pass' });
+    this.target.tessellate(compute);  // only if it changed (once per Level)
+    this.learner.tessellate(compute); // only if the control points changed
+    compute.setPipeline(this.distancePipeline);
+    for (const d of this.directions) {
+      compute.setBindGroup(0, d.distanceGroup);
+      compute.dispatchWorkgroups(Math.ceil(d.sampleCount / DISTANCE_WORKGROUP));
+    }
+    compute.setPipeline(this.reducePipeline);
+    for (const d of this.directions) {
+      compute.setBindGroup(0, d.reduceGroup);
+      compute.dispatchWorkgroups(1);
+    }
+    compute.end();
+
+    // each measurement gets its own staging buffer, so two can overlap
+    const staging = device.createBuffer({ size: this.results.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    encoder.copyBufferToBuffer(this.results, 0, staging, 0, this.results.size);
+    device.queue.submit([encoder.finish()]);
+    const res = this.res;
+    const diagonal = this.diagonal;
+    await staging.mapAsync(GPUMapMode.READ);
+    const r = new Float32Array(staging.getMappedRange().slice(0));
+    staging.destroy();
+
+    const toSums = (k: number): DistanceSums => ({ sumWeightedSquares: r[k], sumWeights: r[k + 1], max: r[k + 2] });
+    return { ...combine(toSums(0), toSums(4), diagonal), diagonal, res };
+  }
+
+  destroy(): void {
+    this.target?.destroy();
+    this.learner?.destroy();
+    for (const d of this.directions) for (const b of d.buffers) b.destroy();
+    this.results.destroy();
+  }
+}

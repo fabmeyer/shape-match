@@ -42,6 +42,11 @@ describe('samplePositions', () => {
     expect(t.some((x) => Math.abs(x - (1 / 3 - CREASE_GAP)) < 1e-12)).toBe(false);
   });
 
+  it('shifts the uniform values by a fraction of a cell, keeping both ends', () => {
+    const t = samplePositions([0, 0, 1, 1], 1, 5, 0.5);
+    expect(t).toEqual([0, 0.125, 0.375, 0.625, 0.875, 1]);
+  });
+
   it('treats every knot of a degree 1 surface as a crease', () => {
     const t = samplePositions(clampedUniformKnots(4, 1), 1, 7); // knots 1/3, 2/3 lie on the grid i/6
     expect(t).toContain(1 / 3);

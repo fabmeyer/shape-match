@@ -17,14 +17,18 @@ export function knotMultiplicities(knots: number[]): Map<number, number> {
 }
 
 // sorted parameter values in [0, 1] (clamped knot vectors span [0, 1]):
-//   the n uniform values i / (n - 1),
+//   the n uniform values i / (n - 1), or with a shift s the values (i + s) / (n - 1) that lie inside,
+//   with 0 and 1 always included (shift = 0.5 is the grid shifted by half a cell, for the Noise floor),
 //   plus every distinct interior knot that is not already one of them,
 //   plus knot - CREASE_GAP for every interior knot with multiplicity >= degree
 // so the count is n + (interior knots not on the grid) + (crease knots)
-export function samplePositions(knots: number[], degree: number, n: number): number[] {
+export function samplePositions(knots: number[], degree: number, n: number, shift = 0): number[] {
   if (n < 2) throw new Error('need at least 2 samples');
-  const values: number[] = [];
-  for (let i = 0; i < n; i++) values.push(i / (n - 1));
+  const values: number[] = [0, 1];
+  for (let i = 0; i < n; i++) {
+    const t = (i + shift) / (n - 1);
+    if (t > 0 && t < 1) values.push(t);
+  }
   const first = knots[0];
   const last = knots[knots.length - 1];
   for (const [knot, count] of knotMultiplicities(knots)) {

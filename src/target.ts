@@ -70,7 +70,7 @@ export function shapeTask(shape: Shape): Task {
     title: `Shape ${shape.difficulty} · ${shape.id}`,
     text: `${shape.order}. ${shape.concept[0].toUpperCase()}${shape.concept.slice(1)}.`,
     target: shape.net,
-    start: squashed(shape.net),
+    start: shape.start ?? squashed(shape.net),
     tools: ALL_TOOLS,
   };
 }

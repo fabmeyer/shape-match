@@ -5,6 +5,7 @@
 //   check():   the Shape match check. A fresh measurement of the surface as it is now, after the calibration
 import type { ControlNet } from './controlNet.ts';
 import { ErrorPass, measureLevel, type GpuShapeDistance } from './errorPass.ts';
+import { debugLog } from './debugLog.ts';
 import { calibrate, grade, gradingConfig, starMarks, type Calibration, type Grade, type GradingConfig } from './grading.ts';
 
 export interface Measurement {
@@ -112,6 +113,7 @@ export class Grader {
       .then(({ noise, start: startDistance }) => {
         if (id !== this.levelId) return; // another Level loaded meanwhile
         this.calibration = calibrate(noise, startDistance, this.config);
+        debugLog.log('calibration', { res: noise.res, noiseRms: noise.rms, noiseHausdorff: noise.hausdorff, ...this.calibration });
         this.dirty = true; // grade the current surface now that the Level is calibrated
       })
       .catch((e) => this.onError?.(e));

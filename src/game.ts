@@ -8,6 +8,7 @@ import {
   type LevelBest, type Progress, type ProgressStorage,
 } from './progress.ts';
 import { showResult } from './resultScreen.ts';
+import { debugLog } from './debugLog.ts';
 import { starText } from './taskPanel.ts';
 import type { Task } from './target.ts';
 
@@ -57,6 +58,7 @@ export class Game {
     this.stopResult?.();
     this.stopResult = undefined;
     for (const [key, el] of Object.entries(this.screens)) el.hidden = key !== name;
+    debugLog.log('screen', { name: name ?? 'workbench' });
   }
 
   showTitle(): void {
@@ -113,6 +115,7 @@ export class Game {
   // a Hand-in: remember it, then the Result screen
   handIn(task: Task, grade: Grade): void {
     const { progress, result } = recordHandIn(this.progress, task.id, grade);
+    debugLog.log('hand-in', { ...result, rms: grade.rms, hausdorff: grade.hausdorff });
     this.progress = progress;
     saveProgress(this.storage, progress);
     this.host.showBest(result.best);

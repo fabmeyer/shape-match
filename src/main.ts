@@ -14,7 +14,8 @@ import { createTessellatePipeline } from './surfaceGrid.ts';
 import { Grader, type Measurement } from './grader.ts';
 import { TaskPanel } from './taskPanel.ts';
 import { Game } from './game.ts';
-import { browserStorage } from './progress.ts';
+import { browserStorage, loadProgress } from './progress.ts';
+import { buildReport, debugLog, errorMessage, netToData } from './debugLog.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
@@ -24,7 +25,18 @@ import gizmoCode from './shaders/gizmo.wgsl?raw';
 import curvesCode from './shaders/curves.wgsl?raw';
 
 const canvas = document.getElementById('gpuCanvas') as HTMLCanvasElement;
-const { device, context, format } = await initWebGPU(canvas);
+const { device, context, format, adapterName } = await initWebGPU(canvas);
+
+// debugging (debugLog.ts): every error ends up in the log; ?debug also echoes the log to the console
+debugLog.echo = new URLSearchParams(location.search).has('debug');
+debugLog.log('start', { version: __APP_VERSION__, adapter: adapterName });
+window.addEventListener('error', (e) => debugLog.log('error', { message: e.message, at: `${e.filename}:${e.lineno}` }));
+window.addEventListener('unhandledrejection', (e) => debugLog.log('error', { message: errorMessage(e.reason) }));
+device.addEventListener('uncapturederror', (e) => {
+  const message = (e as GPUUncapturedErrorEvent).error.message;
+  debugLog.log('error', { gpu: true, message });
+  console.error(`WebGPU error: ${message}`);
+});
 
 // ---------------------------------------------------------
 // Depth buffer and camera
@@ -235,11 +247,21 @@ const grader = new Grader(device, tessellatePipeline);
 const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphElement;
 const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
 errorResSelect.addEventListener('change', () => { grader.resolution = Number(errorResSelect.value); });
-grader.onError = (e) => { distanceInfo.textContent = `Error pass failed: ${e}`; };
+grader.onError = (e) => {
+  distanceInfo.textContent = `Error pass failed: ${errorMessage(e)}`;
+  debugLog.log('error', { in: 'error pass', message: errorMessage(e) });
+};
+let lastMeasurement: Measurement | undefined;
 grader.onMeasured = (m) => {
   if (m.grade && m.starMarks) taskPanel.show(m.grade, m.starMarks);
   showMeasurement(m);
+  // a drag measures many times: the log gets an entry when the Stars change, the report the last one
+  if (m.grade && m.grade.stars !== lastMeasurement?.grade?.stars) {
+    debugLog.log('measure', { stars: m.grade.stars, match: round(m.grade.match), rms: m.distance.rms, hausdorff: m.distance.hausdorff });
+  }
+  lastMeasurement = m;
 };
+const round = (x: number, digits = 3) => Number(x.toFixed(digits));
 
 const taskPanel = new TaskPanel();
 taskPanel.onHandIn = handIn;
@@ -251,7 +273,8 @@ async function handIn() {
     const { grade } = await grader.check();
     game.handIn(task, grade);
   } catch (e) {
-    distanceInfo.textContent = `Shape match check failed: ${e}`;
+    distanceInfo.textContent = `Shape match check failed: ${errorMessage(e)}`;
+    debugLog.log('error', { in: 'hand-in', message: errorMessage(e) });
   } finally {
     taskPanel.setChecking(false);
   }
@@ -309,7 +332,7 @@ const mathValues = document.getElementById('mathValues') as HTMLElement;
 
 const dragger = new PointDragger(canvas, camera, net, {
   onSelect: selectionChanged,
-  onBeginEdit: beginEdit,
+  onBeginEdit: () => beginEdit('drag', { points: [...dragger.selected] }),
   onEdit: pointsChanged,
 });
 const paramView = new ParamSpaceView(document.getElementById('uvCanvas') as HTMLCanvasElement, net, updateMath);
@@ -336,7 +359,8 @@ function visibleSelection(): Set<number> {
 }
 
 // call before every change of the control points, so it can be undone
-function beginEdit() {
+function beginEdit(kind: string, data?: Record<string, unknown>) {
+  debugLog.log('edit', { kind, ...data });
   undoSteps.push(net.points);
   undoButton.disabled = false;
 }
@@ -398,6 +422,7 @@ function undo() {
   const previous = undoSteps.pop();
   if (!previous) return;
   net.points.set(previous);
+  debugLog.log('edit', { kind: 'undo' });
   undoButton.disabled = undoSteps.size === 0;
   pointsChanged();
 }
@@ -408,17 +433,55 @@ function resetPoints() {
     setLearner(cloneNet(task.start));
     return;
   }
-  beginEdit();
+  beginEdit('reset');
   net.points.set(task.start.points);
   dragger.selected.clear();
   selectionChanged();
   pointsChanged();
 }
 
+// developer: everything someone else needs to see what happens here, as JSON on the clipboard
+// (paste it into an issue or a chat); where the clipboard is blocked, it appears in a text field to copy by hand
+const CLIPBOARD_TIMEOUT_MS = 1500;
+async function copyDebugReport() {
+  const report = buildReport({
+    app: { version: __APP_VERSION__, createdAt: new Date().toISOString(), url: location.href },
+    environment: { userAgent: navigator.userAgent, adapter: adapterName, screen: `${innerWidth}x${innerHeight} @${devicePixelRatio}` },
+    task: { id: task.id, title: task.title },
+    learner: netToData(net),
+    state: {
+      mode,
+      camera: { view: camera.view, target: [...camera.target], distance: camera.distance, orientation: [...camera.orientation] },
+      switches: { showPoints, showPolygon, showSolution, showWalkers, showMarker },
+      errorGrid: grader.resolution,
+      calibration: lastMeasurement?.calibration,
+      lastMeasurement: lastMeasurement && { distance: lastMeasurement.distance, grade: lastMeasurement.grade },
+      undoSteps: undoSteps.size,
+      progress: loadProgress(browserStorage()),
+    },
+  });
+  const json = JSON.stringify(report, null, 2);
+  const status = document.getElementById('reportStatus')!;
+  const fallback = document.getElementById('reportText') as HTMLTextAreaElement;
+  // writeText can wait forever on a permission prompt: after a while the text field takes over
+  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('clipboard timeout')), CLIPBOARD_TIMEOUT_MS));
+  try {
+    await Promise.race([navigator.clipboard.writeText(json), timeout]);
+    fallback.hidden = true;
+    status.textContent = `Copied (${Math.round(json.length / 1024)} KB). Paste it where you need it.`;
+  } catch {
+    fallback.hidden = false;
+    fallback.value = json;
+    fallback.select();
+    status.textContent = 'The browser blocked the clipboard: copy the text below by hand.';
+  }
+}
+document.getElementById('copyReport')!.addEventListener('click', copyDebugReport);
+
 // developer: the learner's surface becomes the Target, to try Hand in and the Result screen
 document.getElementById('snapSolution')!.addEventListener('click', () => {
   if (!sameLayout(net, task.target)) return;
-  beginEdit();
+  beginEdit('snap to solution');
   net.points.set(task.target.points);
   pointsChanged();
 });
@@ -470,7 +533,7 @@ let weightEditing = false;
 function setWeights(value: number) {
   if (!Number.isFinite(value) || !task.tools.weights) return;
   if (!weightEditing) {
-    beginEdit();
+    beginEdit('weight', { points: [...visibleSelection()], w: value });
     weightEditing = true;
   }
   const w = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, value));
@@ -535,6 +598,8 @@ function setLearner(next: ControlNet) {
 
 function loadTask(next: Task) {
   task = next;
+  lastMeasurement = undefined;
+  debugLog.log('level', { id: task.id, title: task.title });
   taskPanel.setTask(task.title, task.text);
   dragger.allowMove = task.tools.movePoints;
 
@@ -546,12 +611,15 @@ function loadTask(next: Task) {
   setLearner(cloneNet(task.start));
 }
 
-loadTask(task); // the GPU needs a Task from the first frame on, also behind the Title
-
 // the game screens in front of the Workbench: Title, Board, Order, Result (game.ts)
+// the GPU needs a Task from the first frame on, also behind the Title
 const game = new Game(tasks, { loadTask, showBest: (best) => taskPanel.setBest(best) }, browserStorage());
-if (requested) game.play(requested);
-else game.showTitle();
+if (requested) {
+  game.play(requested);
+} else {
+  loadTask(task);
+  game.showTitle();
+}
 
 // ---------------------------------------------------------
 // Mouse mode and toggles

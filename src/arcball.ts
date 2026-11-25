@@ -17,26 +17,37 @@ export class ArcballCamera {
   orientation: Quat;
   fovY = Math.PI / 4;
   enabled = true;
+  // what dragging does: turn the view around the target, or move it (target and eye together) in the view plane
+  drag: 'rotate' | 'move' = 'rotate';
   view: ViewName = 'perspective';
   onViewChange: (view: ViewName) => void = () => {}; // e.g. rotating leaves a straight-on view
 
   private dragging = false;
   private last: Vec3 = vec3.create();
+  private lastPixel = { x: 0, y: 0 };
   private perspectiveOrientation: Quat = quat.identity(); // to come back to the last free view
+  private home: { target: Vec3; orientation: Quat }; // the starting view, for reset()
 
   constructor(canvas: HTMLCanvasElement, opts: { target?: number[]; distance?: number; orientation?: Quat } = {}) {
     this.target = vec3.fromValues(...((opts.target ?? [0, 0, 0]) as [number, number, number]));
     this.distance = opts.distance ?? 5;
     this.orientation = opts.orientation ?? quat.identity();
+    this.home = { target: vec3.clone(this.target), orientation: quat.clone(this.orientation) };
 
     canvas.addEventListener('pointerdown', (e) => {
       if (!this.enabled) return;
       canvas.setPointerCapture(e.pointerId);
       this.dragging = true;
       this.last = this.toBall(canvas, e);
+      this.lastPixel = { x: e.clientX, y: e.clientY };
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!this.dragging) return;
+      if (this.drag === 'move') {
+        this.move(canvas, e.clientX - this.lastPixel.x, e.clientY - this.lastPixel.y);
+        this.lastPixel = { x: e.clientX, y: e.clientY };
+        return; // moving keeps a straight-on view straight
+      }
       // rotating a straight-on view turns it into a free (perspective) view, starting from where it is
       if (this.view !== 'perspective') {
         this.view = 'perspective';
@@ -73,11 +84,55 @@ export class ArcballCamera {
     this.orientation = quat.normalize(quat.multiply(this.orientation, delta));
   }
 
+  // moves the view by a mouse movement in CSS pixels: the surfaces follow the mouse
+  // one pixel is the same distance at the target in the perspective and the straight-on views
+  private move(canvas: HTMLCanvasElement, dx: number, dy: number) {
+    const height = canvas.getBoundingClientRect().height || 1;
+    const perPixel = (2 * this.distance * Math.tan(this.fovY / 2)) / height;
+    const right = vec3.transformQuat([1, 0, 0], this.orientation);
+    const up = vec3.transformQuat([0, 1, 0], this.orientation);
+    this.target = vec3.add(this.target, vec3.add(vec3.scale(right, -dx * perPixel), vec3.scale(up, dy * perPixel)));
+  }
+
   setView(view: ViewName): void {
     if (view === this.view) return;
     if (this.view === 'perspective') this.perspectiveOrientation = this.orientation;
     this.orientation = view === 'perspective' ? this.perspectiveOrientation : STRAIGHT_VIEWS[view]();
     this.view = view;
+  }
+
+  // back to the starting perspective view: its angle and target, at the given distance
+  // (the caller picks the distance, so both surfaces fit the window as it is now)
+  reset(distance: number): void {
+    this.target = vec3.clone(this.home.target);
+    this.orientation = quat.clone(this.home.orientation);
+    this.perspectiveOrientation = quat.clone(this.home.orientation);
+    this.distance = distance;
+    if (this.view !== 'perspective') {
+      this.view = 'perspective';
+      this.onViewChange(this.view);
+    }
+  }
+
+  // the camera for the shaders in homogeneous coordinates:
+  //   perspective:  its position (x, y, z, 1), every point sees it from another direction
+  //   straight-on:  a direction (x, y, z, 0), the camera is infinitely far away (orthographic),
+  //                 so every point sees it from the same direction
+  get eyeHomogeneous(): [number, number, number, number] {
+    if (this.view === 'perspective') {
+      const e = this.eye;
+      return [e[0], e[1], e[2], 1];
+    }
+    const back = vec3.transformQuat([0, 0, 1], this.orientation);
+    return [back[0], back[1], back[2], 0];
+  }
+
+  // how big something at this point appears depends on this distance: the distance to the eye in
+  // perspective, the same for every point when orthographic (the ortho window matches it at the target)
+  viewDistance(point: ArrayLike<number>): number {
+    if (this.view !== 'perspective') return this.distance;
+    const e = this.eye;
+    return Math.hypot(e[0] - point[0], e[1] - point[1], e[2] - point[2]);
   }
 
   get eye(): Vec3 {

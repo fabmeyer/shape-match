@@ -283,8 +283,7 @@ export class PointDragger {
 
   // the arrows get longer with the distance to the camera, so they keep their size on screen
   private arrowLength(origin: Point3): number {
-    const eye = this.camera.eye;
-    return ARROW_LENGTH * Math.hypot(eye[0] - origin[0], eye[1] - origin[1], eye[2] - origin[2]);
+    return ARROW_LENGTH * this.camera.viewDistance(origin);
   }
 
   // parameter s of the point on the line origin + s * axis that is closest to the ray under the mouse

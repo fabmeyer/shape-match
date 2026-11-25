@@ -10,3 +10,4 @@ dist/
 # written by scripts/shapes-preview.ts, converted to preview.png by hand
 docs/shapes/preview.bmp
 .playwright-mcp/
+.vitest/

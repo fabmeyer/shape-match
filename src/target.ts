@@ -2,6 +2,7 @@
 // starting Learner surface share that Layout, but different Tasks can have different Layouts
 import { flatControlNet, getPoint, setPoint, type ControlNet } from './controlNet.ts';
 import { allShapes, type Shape } from './shapes.ts';
+import type { GradingConfig } from './grading.ts';
 
 // the target is drawn this far to the right of the learner's surface (both are about 2 wide)
 export const TARGET_OFFSET = 2.8;
@@ -13,15 +14,6 @@ export interface Tools {
   knotInsertion: boolean; // not built yet (issue #19)
 }
 
-// a Level can change the grading factors of the plan (§2); used once grading exists (issue #10)
-export interface GradingOverrides {
-  noiseFactor?: number;  // τ = max(noiseFactor × Noise floor, minTolerance × diagonal)
-  minTolerance?: number;
-  star2Factor?: number;  // 2★ up to star2Factor × τ
-  star1Factor?: number;  // 1★ up to star1Factor × τ
-  hausdorffFactor?: number;
-}
-
 export interface Task {
   id: string;           // stable name, also used in the URL (?task=ball)
   title: string;
@@ -29,7 +21,7 @@ export interface Task {
   target: ControlNet;   // in the same coordinates as the learner's net (not shifted)
   start: ControlNet;    // starting Learner surface, same Layout as the target
   tools: Tools;
-  grading?: GradingOverrides;
+  grading?: Partial<GradingConfig>; // changes to the grading factors for this Level
 }
 
 const ALL_TOOLS: Tools = { movePoints: true, weights: true, knotInsertion: false };

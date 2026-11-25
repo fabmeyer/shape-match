@@ -11,7 +11,10 @@ import { updateMathPanel } from './mathPanel.ts';
 import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task } from './target.ts';
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
-import { ErrorPass, type GpuShapeDistance } from './errorPass.ts';
+import { Grader, type Measurement } from './grader.ts';
+import { TaskPanel } from './taskPanel.ts';
+import { Game } from './game.ts';
+import { browserStorage } from './progress.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
@@ -225,33 +228,42 @@ const gizmoBindGroup = device.createBindGroup({
 });
 
 // ---------------------------------------------------------
-// Shape distance: the error pass runs on its own grid, only after the net changed
+// Grading: the Shape distance on its own error grid, measured only after the net changed (grader.ts)
 // ---------------------------------------------------------
 
-const errorPass = new ErrorPass(device, tessellatePipeline);
-let distanceDirty = true; // the net changed since the last measurement
-let measuring = false;    // a measurement is on its way back from the GPU
+const grader = new Grader(device, tessellatePipeline);
 const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphElement;
 const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
-errorResSelect.addEventListener('change', () => {
-  errorPass.resolution = Number(errorResSelect.value);
-  distanceDirty = true;
-});
+errorResSelect.addEventListener('change', () => { grader.resolution = Number(errorResSelect.value); });
+grader.onError = (e) => { distanceInfo.textContent = `Error pass failed: ${e}`; };
+grader.onMeasured = (m) => {
+  if (m.grade && m.starMarks) taskPanel.show(m.grade, m.starMarks);
+  showMeasurement(m);
+};
 
-// at most one measurement at a time; changes made meanwhile are measured right after it
-function measureShapeDistance() {
-  measuring = true;
-  distanceDirty = false;
-  const start = performance.now();
-  errorPass.measure()
-    .then((d) => showShapeDistance(d, performance.now() - start))
-    .catch((e) => { distanceInfo.textContent = `Error pass failed: ${e}`; })
-    .finally(() => { measuring = false; });
+const taskPanel = new TaskPanel();
+taskPanel.onHandIn = handIn;
+
+// Hand-in: the Shape match check on the surface as it is now
+async function handIn() {
+  taskPanel.setChecking(true);
+  try {
+    const { grade } = await grader.check();
+    game.handIn(task, grade);
+  } catch (e) {
+    distanceInfo.textContent = `Shape match check failed: ${e}`;
+  } finally {
+    taskPanel.setChecking(false);
+  }
 }
 
-function showShapeDistance(d: GpuShapeDistance, ms: number) {
+// developer readout: the raw numbers behind the Match meter
+function showMeasurement({ distance: d, grade, calibration, ms }: Measurement) {
   const percent = (x: number, digits: number) => `${(100 * x).toFixed(digits)} %`;
-  distanceInfo.textContent = `RMS ${percent(d.rms, 3)}, Hausdorff ${percent(d.hausdorff, 2)} of the diagonal `
+  const graded = grade && calibration
+    ? `${grade.stars}★, Match ${grade.match.toFixed(1)} %, τ ${percent(calibration.tolerance, 3)}, τ_H ${percent(calibration.hausdorffTolerance, 3)}. `
+    : 'Calibrating… ';
+  distanceInfo.textContent = `${graded}RMS ${percent(d.rms, 3)}, Hausdorff ${percent(d.hausdorff, 2)} of the diagonal `
     + `(error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
 }
 
@@ -260,8 +272,9 @@ function showShapeDistance(d: GpuShapeDistance, ms: number) {
 // ---------------------------------------------------------
 
 const tasks = allTasks();
-const requested = new URLSearchParams(location.search).get('task');
-let task: Task = tasks.find((t) => t.id === requested) ?? tasks[0];
+// developer shortcut: ?task=<id> opens that Task on the Workbench, past the Title and the locks
+const requested = tasks.find((t) => t.id === new URLSearchParams(location.search).get('task'));
+let task: Task = requested ?? tasks[0];
 
 let net: ControlNet = cloneNet(task.start); // the Learner surface
 let learner: SurfaceGpu | undefined;
@@ -275,7 +288,7 @@ let walkerPointsBindGroup: GPUBindGroup | undefined;
 // Editing: selection, moving, weights, undo
 // ---------------------------------------------------------
 
-type Mode = 'rotate' | 'select';
+type Mode = 'rotate' | 'move' | 'select';
 let mode: Mode = 'rotate';
 let showPoints = true;    // the learner's control points and their stems
 let showPolygon = true;
@@ -331,8 +344,7 @@ function beginEdit() {
 // call after every change of the control points
 function pointsChanged() {
   learner!.uploadPoints(net.points);
-  errorPass.uploadLearnerPoints(net.points);
-  distanceDirty = true;
+  grader.learnerPointsChanged(net.points);
   updateMath();
   updateWeightPanel();
 }
@@ -402,6 +414,14 @@ function resetPoints() {
   selectionChanged();
   pointsChanged();
 }
+
+// developer: the learner's surface becomes the Target, to try Hand in and the Result screen
+document.getElementById('snapSolution')!.addEventListener('click', () => {
+  if (!sameLayout(net, task.target)) return;
+  beginEdit();
+  net.points.set(task.target.points);
+  pointsChanged();
+});
 
 undoButton.addEventListener('click', undo);
 document.getElementById('reset')!.addEventListener('click', resetPoints);
@@ -477,8 +497,7 @@ function setLearner(next: ControlNet) {
   learner?.destroy();
   learner = new SurfaceGpu(device, pipelines, cameraBuffer, learnerColorBuffer, net);
   flagData = new Uint32Array(learner.pointCount);
-  errorPass.setLearner(net);
-  distanceDirty = true;
+  grader.setLearner(net);
 
   walkerPointBuffer?.destroy();
   walkerFlagBuffer?.destroy();
@@ -516,31 +535,23 @@ function setLearner(next: ControlNet) {
 
 function loadTask(next: Task) {
   task = next;
-  document.getElementById('taskTitle')!.textContent = task.title;
-  document.getElementById('taskText')!.textContent = task.text;
+  taskPanel.setTask(task.title, task.text);
   dragger.allowMove = task.tools.movePoints;
 
   target?.destroy();
   target = new SurfaceGpu(device, pipelines, cameraBuffer, targetColorBuffer, task.target,
     shiftedPoints(task.target, TARGET_OFFSET));
-  errorPass.setTarget(task.target); // unshifted: the distance compares the surfaces where they are defined
+  grader.setLevel(task.target, task.start, task.grading); // unshifted: the distance compares the surfaces where they are defined
   // the target's control points (solution switch) are never selected: all flags stay 0
   setLearner(cloneNet(task.start));
 }
 
-// Level menu: a stand-in for the Board, which comes with the game screens
-const taskSelect = document.getElementById('taskSelect') as HTMLSelectElement;
-for (const t of tasks) taskSelect.add(new Option(t.title, t.id));
-taskSelect.value = task.id;
-taskSelect.addEventListener('change', () => {
-  const next = tasks.find((t) => t.id === taskSelect.value)!;
-  loadTask(next);
-  const url = new URL(location.href);
-  url.searchParams.set('task', next.id);
-  history.replaceState(null, '', url); // a reload stays in the same Level
-});
+loadTask(task); // the GPU needs a Task from the first frame on, also behind the Title
 
-loadTask(task);
+// the game screens in front of the Workbench: Title, Board, Order, Result (game.ts)
+const game = new Game(tasks, { loadTask, showBest: (best) => taskPanel.setBest(best) }, browserStorage());
+if (requested) game.play(requested);
+else game.showTitle();
 
 // ---------------------------------------------------------
 // Mouse mode and toggles
@@ -551,7 +562,8 @@ const modeButtons = document.querySelectorAll<HTMLButtonElement>('#mode button')
 function setMode(next: Mode) {
   if (next === 'select' && !showPoints) return; // hidden points can't be picked
   mode = next;
-  camera.enabled = mode === 'rotate';
+  camera.enabled = mode !== 'select';
+  camera.drag = mode === 'move' ? 'move' : 'rotate';
   dragger.enabled = mode === 'select';
   canvas.dataset.mode = mode;
   selectionChanged(); // no highlight while rotating
@@ -570,6 +582,7 @@ viewButtons.forEach((b) => b.addEventListener('click', () => {
   showView(camera.view);
 }));
 camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
+document.getElementById('resetView')!.addEventListener('click', () => camera.reset(startDistance()));
 setMode('rotate');
 
 // hiding the points also leaves Select mode: points you can't see can't be picked
@@ -619,7 +632,7 @@ function frame() {
   const learnerGpu = learner!;
   const targetGpu = target!;
   cameraData.set(camera.viewProjection(canvas.width / canvas.height), 0);
-  cameraData.set([...camera.eye, 1], 16);
+  cameraData.set(camera.eyeHomogeneous, 16); // w = 0 in the straight-on views: orthographic
   cameraData.set([canvas.width, canvas.height, 0, 0], 20);
   device.queue.writeBuffer(cameraBuffer, 0, cameraData);
 
@@ -699,7 +712,7 @@ function frame() {
   pass.end();
   device.queue.submit([encoder.finish()]);
 
-  if (distanceDirty && !measuring) measureShapeDistance();
+  grader.update();
 
   requestAnimationFrame(frame);
 }

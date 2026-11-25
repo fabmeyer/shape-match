@@ -6,8 +6,8 @@ Applied Computer Graphics, Fall 2026, course project.
 The learner reshapes a NURBS surface (blue) until it matches a Target (orange). The editor
 evaluates the surfaces on the GPU, and the Shape distance between them is measured on the GPU
 too. The plan is in [docs/PLAN.md](docs/PLAN.md), the terms in [GLOSSARY.md](GLOSSARY.md),
-the decisions in [docs/adr](docs/adr/). Pick a Level in the side panel or open one directly,
-for example `?task=house`.
+the decisions in [docs/adr](docs/adr/). The game starts at the Title and the Board; for
+development, `?task=house` opens a Level directly on the Workbench, past the locks.
 
 ## Run
 
@@ -46,6 +46,11 @@ are imported with `?raw`.
 | `src/surfaceGpu.ts` | A drawn surface: render grid, control points, polygon, stems |
 | `src/shapeDistance.ts` | Shape distance on the CPU, the reference (ADR 0002) |
 | `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`) |
+| `src/grading.ts` | Grading rules: Tolerance, Stars, Passed, Match (pure, one config) |
+| `src/grader.ts` | Live grading on the Workbench and the Shape match check of a Hand-in |
+| `src/taskPanel.ts` | Task panel: Match meter, live Stars, Hand in button |
+| `src/progress.ts` | Best per Level, unlocking, Hint cap, saved in `localStorage` |
+| `src/game.ts`, `src/resultScreen.ts`, `src/game.css` | Game screens: Title, Board, Order, Result after a Hand-in |
 | `src/shapeChecks.ts` | Checks for the shape library (also run by `npm test`) |
 | `src/pointDrag.ts`, `src/arcball.ts` | Picking and dragging control points, the camera |
 | `src/paramSpace.ts`, `src/partition.ts`, `src/mathPanel.ts`, `src/walkers.ts` | The side panel views |

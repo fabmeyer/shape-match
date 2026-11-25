@@ -1,11 +1,12 @@
 // the GPU error pass against the CPU reference (shapeDistance.ts)
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { flatControlNet, getPoint, setPoint, type ControlNet } from './controlNet.ts';
-import { ErrorPass } from './errorPass.ts';
+import { ErrorPass, measureLevel } from './errorPass.ts';
 import { shapeDistance } from './shapeDistance.ts';
 import { allShapes } from './shapes.ts';
 import { allTasks, cloneNet } from './target.ts';
 import { readBuffer, requestTestDevice } from './gpuTesting.ts';
+import { createTessellatePipeline } from './surfaceGrid.ts';
 
 const RES = 16; // the CPU reference is brute force, small grids keep it fast
 
@@ -43,8 +44,10 @@ beforeAll(async () => {
 });
 afterAll(() => pass.destroy());
 
+// relative for normal values, absolute near 0 (a flat surface has a Noise floor of exactly 0 on the CPU, f32 noise on the GPU)
+const ZERO_TOLERANCE = 1e-6;
 function expectClose(gpu: number, cpu: number) {
-  expect(Math.abs(gpu - cpu)).toBeLessThanOrEqual(SUM_TOLERANCE * Math.max(cpu, 1e-6));
+  expect(Math.abs(gpu - cpu)).toBeLessThanOrEqual(Math.max(SUM_TOLERANCE * cpu, ZERO_TOLERANCE));
 }
 
 describe('error pass', () => {
@@ -83,6 +86,18 @@ describe('error pass', () => {
     const after = await pass.measure();
     expect(before.rms).toBeGreaterThan(0.01);
     expect(after.rms).toBeLessThan(1e-6);
+  });
+
+  it('measures the Noise floor and the start of a Level like the CPU', async () => {
+    const level = await measureLevel(device, createTessellatePipeline(device), house.target, house.start, RES);
+    const noise = shapeDistance(house.target, house.target, { res: RES, learnerShift: 0.5 });
+    const start = shapeDistance(house.target, house.start, { res: RES });
+    expectClose(level.noise.rms, noise.rms);
+    expectClose(level.start.rms, start.rms);
+    const ball = shape('ball');
+    const ballNoise = await measureLevel(device, createTessellatePipeline(device), ball, ball, RES);
+    expectClose(ballNoise.noise.rms, shapeDistance(ball, ball, { res: RES, learnerShift: 0.5 }).rms);
+    expectClose(ballNoise.noise.hausdorff, shapeDistance(ball, ball, { res: RES, learnerShift: 0.5 }).hausdorff);
   });
 
   it('can change the grid size at run time', async () => {

@@ -12,6 +12,7 @@
     #gpuCanvas { flex: 1; min-width: 0; height: 100%; display: block; touch-action: none; }
     #gpuCanvas[data-mode="rotate"] { cursor: grab; }
     #gpuCanvas[data-mode="rotate"]:active { cursor: grabbing; }
+    #gpuCanvas[data-mode="move"] { cursor: move; }
     #gpuCanvas[data-mode="select"] { cursor: crosshair; }
 
     /* right: stays inside the 3D view (side panel 330 px + margin); wraps to a second row when narrow */
@@ -75,6 +76,39 @@
       flex: 1; min-width: 0; padding: 4px 6px; background: #1e2027; color: #e6e8ec;
       border: 1px solid #333844; border-radius: 4px; font: inherit;
     }
+    /* Task panel: Match meter, live Stars, Hand in */
+    .match { margin: 10px 0 6px; }
+    .match-label { display: flex; justify-content: space-between; font-size: 12px; color: #9aa0aa; margin-bottom: 4px; }
+    #matchValue { color: #e6e8ec; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .meter { position: relative; height: 12px; background: #2a2e38; border-radius: 6px; overflow: visible; }
+    .meter-fill {
+      height: 100%; width: 0; border-radius: 6px; transition: width 0.35s ease-out, background 0.35s;
+      background: linear-gradient(90deg, #3b6fd8, #4fb3d9);
+    }
+    .meter-fill[data-stars="1"] { background: linear-gradient(90deg, #3b6fd8, #e2c044); }
+    .meter-fill[data-stars="2"] { background: linear-gradient(90deg, #4fb3d9, #f0a030); }
+    .meter-fill[data-stars="3"] { background: linear-gradient(90deg, #e2c044, #f2682e); }
+    .meter-mark {
+      position: absolute; top: 14px; transform: translateX(-50%); font-size: 9px; line-height: 1;
+      color: #9aa0aa; white-space: nowrap;
+    }
+    .meter-mark::before { content: ""; position: absolute; left: 50%; top: -14px; width: 1px; height: 12px; background: #16181d; }
+    .stars-row { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 0 10px; }
+    .live-stars { font-size: 22px; letter-spacing: 2px; color: #5c606b; }
+    .live-stars[data-stars="1"], .live-stars[data-stars="2"], .live-stars[data-stars="3"] { color: #f5c542; }
+    .hand-in {
+      width: 100%; padding: 10px; border: 0; border-radius: 8px; cursor: pointer;
+      font: 600 15px system-ui, sans-serif; color: #fff; background: #4a7bd0;
+      box-shadow: 0 3px 0 #2f569b; transition: transform 0.08s, box-shadow 0.08s;
+    }
+    .hand-in:hover:not(:disabled) { background: #5a8be0; }
+    .hand-in:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 #2f569b; }
+    .hand-in:disabled { background: #333844; color: #8a8f99; box-shadow: none; cursor: default; }
+    .hand-in.ready { background: #f2a62e; color: #2a1a00; box-shadow: 0 3px 0 #b8741a; animation: ready-glow 1.4s ease-in-out infinite; }
+    .hand-in.ready:hover { background: #f7b84a; }
+    @keyframes ready-glow { 50% { box-shadow: 0 3px 0 #b8741a, 0 0 14px 2px rgba(245, 197, 66, 0.55); } }
+    @media (prefers-reduced-motion: reduce) { .hand-in.ready { animation: none; } .meter-fill { transition: none; } }
+
     .panel-button {
       padding: 5px 10px; border: 1px solid #333844; border-radius: 5px;
       background: #1e2027; color: #c9ccd3; font: inherit; cursor: pointer;
@@ -116,8 +150,12 @@
   <canvas id="gpuCanvas"></canvas>
 
   <div id="toolbar">
+    <div class="group">
+      <button id="toBoard" title="Back to the Board with all Levels">Board</button>
+    </div>
     <div id="mode" class="group" role="group" aria-label="Mouse mode">
       <button data-mode="rotate" aria-pressed="true" title="Drag to rotate the view">Rotate</button>
+      <button data-mode="move" aria-pressed="false" title="Drag to move the view sideways and up or down (also in Top, Front and Side)">Move</button>
       <button data-mode="select" aria-pressed="false" title="Click or drag a rectangle to select control points, drag an arrow to move them">Select</button>
     </div>
     <div id="view" class="group" role="group" aria-label="View">
@@ -126,6 +164,14 @@
       <button data-view="front" aria-pressed="false" title="Straight from the front, onto the xz-plane">Front</button>
       <button data-view="side" aria-pressed="false" title="Straight from the side, onto the yz-plane">Side</button>
     </div>
+    <button id="resetView" class="icon-button" title="Reset the view: back to the starting angle and zoom" aria-label="Reset view">
+      <!-- a camera frame with a circular arrow: back to the start -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 1 0 3-6.7"/>
+        <path d="M3 4v5h5"/>
+        <circle cx="12" cy="12" r="2.5"/>
+      </svg>
+    </button>
     <button id="undo" class="icon-button" title="Undo the last change (Ctrl+Z)" aria-label="Undo" disabled>
       <!-- arrow turning back to the left -->
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -166,29 +212,22 @@
   </div>
 
   <aside id="side">
-    <section>
-      <label class="row muted" title="Pick a Level (stand-in for the Board until the game screens exist)">
-        Level
-        <select id="taskSelect"></select>
-      </label>
-    </section>
-
-    <section>
+    <section id="taskPanel">
       <h2 id="taskTitle">Task</h2>
       <p id="taskText"></p>
-    </section>
-
-    <section>
-      <h2>Shape distance <span class="muted">(dev)</span></h2>
-      <p id="distanceInfo" class="muted">Measuring…</p>
-      <label class="row muted" title="Samples per direction of the error grid (the knots are added)">
-        Error grid
-        <select id="errorRes">
-          <option value="32">32 × 32</option>
-          <option value="64" selected>64 × 64</option>
-          <option value="128">128 × 128</option>
-        </select>
-      </label>
+      <div class="match">
+        <div class="match-label"><span>Match</span><span id="matchValue">…</span></div>
+        <div class="meter" role="presentation">
+          <div id="matchFill" class="meter-fill"></div>
+          <span id="mark1" class="meter-mark" title="1 Star from here" hidden>★</span>
+          <span id="mark2" class="meter-mark" title="2 Stars from here" hidden>★★</span>
+        </div>
+      </div>
+      <div class="stars-row">
+        <span id="liveStars" class="live-stars" title="Stars your surface would get now">☆☆☆</span>
+        <span id="bestStars" class="muted">No hand-in yet</span>
+      </div>
+      <button id="handIn" class="hand-in" disabled>Calibrating…</button>
     </section>
 
     <section>
@@ -296,7 +335,50 @@
       <div id="mathValues"></div>
       </details>
     </section>
+    <section>
+      <details id="devPanel" class="section">
+        <summary>Developer</summary>
+        <p id="distanceInfo" class="muted">Measuring…</p>
+        <p><button id="snapSolution" class="panel-button" title="Set your surface to the Target (can be undone), to try Hand in and the Result screen">Snap to solution</button></p>
+        <label class="row muted" title="Samples per direction of the error grid (the knots are added)">
+          Error grid
+          <select id="errorRes">
+            <option value="32">32 × 32</option>
+            <option value="64" selected>64 × 64</option>
+            <option value="128">128 × 128</option>
+          </select>
+        </label>
+      </details>
+    </section>
   </aside>
+
+  <!-- game screens, in front of the Workbench (game.ts) -->
+  <section id="titleScreen" class="screen" hidden>
+    <h1 class="party-title">Shape<br>Match!</h1>
+    <p class="party-sub">Customers order objects. You bend the surface until it matches.</p>
+    <button id="titlePlay" class="party-button yellow big">Play</button>
+  </section>
+
+  <section id="boardScreen" class="screen" hidden>
+    <h1 class="party-title" style="font-size: clamp(40px, 6vw, 64px)">The Board</h1>
+    <p class="party-sub">Pick a space. Pass a Level to unlock the next one.</p>
+    <ol id="boardPath" class="board-path"></ol>
+  </section>
+
+  <section id="orderScreen" class="screen" hidden>
+    <div class="order-card">
+      <p class="order-kicker">New order</p>
+      <h2 id="orderTitle"></h2>
+      <p id="orderText"></p>
+      <p id="orderBest"></p>
+      <div class="order-buttons">
+        <button id="orderStart" class="party-button green">Start</button>
+        <button id="orderBack" class="party-button purple small">Back to the Board</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="resultScreen" class="screen result-screen" hidden aria-live="polite"></section>
 
   <script type="module" src="./src/main.ts"></script>
 </body>

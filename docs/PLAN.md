@@ -30,8 +30,9 @@ Priorities until 17.12: (1) error pass + evaluation, (2) Levels with the Solved 
 
 ### 3.1 Correctness
 - The worked example from the lecture: cubic, 7 points, U = [0,0,0,0, .25, .5, .75, 1,1,1,1], u = 0.42 → span 4, basis [0.0082, 0.3588, 0.5807, 0.0524]. `nurbs.ts` already matches it (checked 25.11).
-- There are no course test models. Instead, **Reference models** with exact geometry (#7): an **open patch** (bicubic Bézier, against the Bernstein form), a **sphere** (every point at distance r from the centre) and a **torus** (every point fulfils (√(x² + y²) − R)² + z² = r²). Every sample can be checked, not just a few (u, v).
-- Each check runs twice: on the CPU (`nurbs.ts`, vitest) and on the GPU (`tessellate.wgsl` with a readback), with a fixed f32 tolerance. The sphere and the torus also test rational and closed surfaces.
+- The course provides no test models, so we build our own **Reference models** with exact geometry (#7). **Not built yet** (planned for 10.12): an **open patch** (bicubic Bézier, against the Bernstein form), a **sphere** (every point at distance r from the centre) and a **torus** (every point fulfils (√(x² + y²) − R)² + z² = r²). Every sample can be checked, not just a few (u, v).
+- Built so far: GPU tessellation is compared with the CPU `evaluate()` on the lecture net, Ball, Vase and House (`src/surfaceGrid.gpu.test.ts`), and the GPU Shape distance with the CPU reference (`src/errorPass.gpu.test.ts`).
+- Once the Reference models exist, each check runs twice: on the CPU (`nurbs.ts`, vitest) and on the GPU (`tessellate.wgsl` with a readback), with a fixed f32 tolerance. The sphere and the torus also test rational and closed surfaces.
 
 ### 3.2 Performance
 - Request `timestamp-query` as an optional feature. Without it, the UI shows "not available".
@@ -81,7 +82,7 @@ Each Level has its own Layout, shared by its Target and its starting Learner sur
 
 **Starting surfaces**: from the Tent on, a shape's start is wrong in more than one direction, harder step by step (see `startChange` in `src/target.ts`): flattened and wider in x (Tent, Star, Ball), also narrower in y (Vase, House, Tree, Cup), also leaning backwards (Mushroom, Boat, Car). All of these are affine, so the start keeps the Target's Layout and weights (ADR 0001).
 
-The script checks every Layout (knot count, clamped, degree ≤ 3, weights > 0). For the closed shapes it checks that the seam closes, that the caps of the extrusions close, and that every revolution is round to 1e-5. That last check also tests `nurbs.ts`, alongside the Reference models.
+The script checks every Layout (knot count, clamped, degree ≤ 3, weights > 0). For the closed shapes it checks that the seam closes, that the caps of the extrusions close, and that every revolution is round to 1e-5. That last check also tests `nurbs.ts` until the Reference models exist.
 
 Not possible as one surface: a house with a separate roof, a tree with a separate trunk, a car with four separate wheels. Those would need several patches, which are out of scope.
 
@@ -139,4 +140,4 @@ Zhao, Lowther and Shene, *A Tool for Teaching Curve Design* (Michigan Tech, NSF 
 
 ## 10. Still open
 
-- Nothing at the moment. (The course test models don't exist; Reference models replace them, see §3.1.)
+- Nothing at the moment. (The course test models don't exist; we build our own Reference models instead, see §3.1. They are not built yet.)

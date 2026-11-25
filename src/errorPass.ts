@@ -41,6 +41,7 @@ export class ErrorPass {
   private res = ERROR_RES;
   private targetNet?: ControlNet;
   private learnerNet?: ControlNet;
+  private learnerShift = 0;
   private target?: SurfaceGrid;
   private learner?: SurfaceGrid;
   private diagonal = 1;
@@ -72,7 +73,7 @@ export class ErrorPass {
     if (res === this.res) return;
     this.res = res;
     if (this.targetNet) this.setTarget(this.targetNet);
-    if (this.learnerNet) this.setLearner(this.learnerNet);
+    if (this.learnerNet) this.setLearner(this.learnerNet, this.learnerShift);
   }
 
   // a new Level: the Target only changes here
@@ -85,10 +86,12 @@ export class ErrorPass {
   }
 
   // a new Learner surface, possibly with another Layout (Level load, knot insertion)
-  setLearner(net: ControlNet): void {
+  // shift moves its grid by a fraction of a cell: the Target with shift 0.5 gives the Noise floor
+  setLearner(net: ControlNet, shift = 0): void {
     this.learnerNet = net;
+    this.learnerShift = shift;
     this.learner?.destroy();
-    this.learner = new SurfaceGrid(this.device, this.tessellatePipeline, net, this.res);
+    this.learner = new SurfaceGrid(this.device, this.tessellatePipeline, net, this.res, { shift });
     this.rebuildDirections();
   }
 
@@ -177,5 +180,24 @@ export class ErrorPass {
     this.learner?.destroy();
     for (const d of this.directions) d.buffers.destroy();
     this.results.destroy();
+  }
+}
+
+// what a Level needs before it can be graded (grading.ts), measured once when it loads:
+//   noise: the Target against itself on a grid shifted by half a cell (the Noise floor)
+//   start: the starting Learner surface against the Target (0 % Match)
+// uses its own ErrorPass, so the learner can edit meanwhile
+export async function measureLevel(device: GPUDevice, tessellatePipeline: GPUComputePipeline,
+  target: ControlNet, start: ControlNet, res = ERROR_RES): Promise<{ noise: GpuShapeDistance; start: GpuShapeDistance }> {
+  const pass = new ErrorPass(device, tessellatePipeline);
+  try {
+    pass.resolution = res;
+    pass.setTarget(target);
+    pass.setLearner(target, 0.5);
+    const noise = await pass.measure();
+    pass.setLearner(start);
+    return { noise, start: await pass.measure() };
+  } finally {
+    pass.destroy();
   }
 }

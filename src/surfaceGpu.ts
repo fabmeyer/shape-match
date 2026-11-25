@@ -3,6 +3,7 @@
 // everything here depends on the Layout, so a new Layout means a new SurfaceGpu (ADR 0001):
 // a Level brings its own Layout, and knot insertion changes the Layout inside a Level
 import type { ControlNet } from './controlNet.ts';
+import { BufferSet } from './gpuBuffer.ts';
 import { SurfaceGrid } from './surfaceGrid.ts';
 
 // samples per direction before the knots are added (samples.ts)
@@ -23,7 +24,7 @@ export class SurfaceGpu {
 
   private device: GPUDevice;
   private pipelines: SurfacePipelines;
-  private buffers: GPUBuffer[] = [];
+  private buffers: BufferSet;
   private flags: GPUBuffer; // one u32 per control point for points.wgsl
   private indices: GPUBuffer;
   private indexCount: number;
@@ -38,9 +39,10 @@ export class SurfaceGpu {
     net: ControlNet, points: Float32Array = net.points) {
     this.device = device;
     this.pipelines = pipelines;
+    this.buffers = new BufferSet(device);
     this.pointCount = net.countU * net.countV;
     this.grid = new SurfaceGrid(device, pipelines.tessellate, net, RENDER_RES, { points });
-    this.flags = this.buffer('point flags', GPUBufferUsage.STORAGE, this.pointCount * 4);
+    this.flags = this.buffers.create('point flags', GPUBufferUsage.STORAGE, this.pointCount * 4);
 
     // two triangles per grid cell; the patch is open, so no wrap-around like the torus knot
     const { resU, resV } = this.grid;
@@ -55,7 +57,7 @@ export class SurfaceGpu {
       }
     }
     this.indexCount = indices.length;
-    this.indices = this.buffer('surface indices', GPUBufferUsage.INDEX, indices);
+    this.indices = this.buffers.create('surface indices', GPUBufferUsage.INDEX, indices);
 
     // control polygon: one line between every two neighbouring control points (in u and in v)
     const segments: number[] = [];
@@ -67,7 +69,7 @@ export class SurfaceGpu {
       }
     }
     this.segmentCount = segments.length / 2;
-    const segmentBuffer = this.buffer('polygon segments', GPUBufferUsage.STORAGE, new Uint32Array(segments));
+    const segmentBuffer = this.buffers.create('polygon segments', GPUBufferUsage.STORAGE, new Uint32Array(segments));
 
     const controlPoints = this.grid.controlPoints;
     const group = (pipeline: GPUPipelineBase, buffers: GPUBuffer[]) => device.createBindGroup({
@@ -78,15 +80,6 @@ export class SurfaceGpu {
     this.pointsGroup = group(pipelines.points, [camera, controlPoints, this.flags]);
     this.polygonGroup = group(pipelines.polygon, [camera, controlPoints, segmentBuffer]);
     this.stemsGroup = group(pipelines.stems, [camera, controlPoints]);
-  }
-
-  // a buffer filled with data, or an empty one of the given size in bytes
-  private buffer(label: string, usage: number, content: ArrayBufferView | number): GPUBuffer {
-    const size = typeof content === 'number' ? content : content.byteLength;
-    const buffer = this.device.createBuffer({ label, size, usage: usage | GPUBufferUsage.COPY_DST });
-    if (typeof content !== 'number') this.device.queue.writeBuffer(buffer, 0, content as GPUAllowSharedBufferSource);
-    this.buffers.push(buffer);
-    return buffer;
   }
 
   get dirty(): boolean {
@@ -136,6 +129,6 @@ export class SurfaceGpu {
 
   destroy(): void {
     this.grid.destroy();
-    for (const buffer of this.buffers) buffer.destroy();
+    this.buffers.destroy();
   }
 }

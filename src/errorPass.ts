@@ -7,6 +7,7 @@
 // shapeDistance.ts is the CPU reference: same samples, same triangles, same weights
 import type { ControlNet } from './controlNet.ts';
 import { boundingDiagonal, combine, ERROR_RES, sampleSurface, type DistanceSums } from './shapeDistance.ts';
+import { BufferSet } from './gpuBuffer.ts';
 import { createTessellatePipeline, SurfaceGrid } from './surfaceGrid.ts';
 import distanceCode from './shaders/distance.wgsl?raw';
 import reduceCode from './shaders/reduce.wgsl?raw';
@@ -27,7 +28,7 @@ interface Direction {
   distanceGroup: GPUBindGroup;
   reduceGroup: GPUBindGroup;
   sampleCount: number;
-  buffers: GPUBuffer[];
+  buffers: BufferSet;
 }
 
 export class ErrorPass {
@@ -107,7 +108,7 @@ export class ErrorPass {
   }
 
   private rebuildDirections(): void {
-    for (const d of this.directions) for (const b of d.buffers) b.destroy();
+    for (const d of this.directions) d.buffers.destroy();
     this.directions = [];
     if (!this.learner || !this.target) return;
     this.directions = [this.direction(this.learner, this.target, 0), this.direction(this.target, this.learner, 1)];
@@ -115,14 +116,13 @@ export class ErrorPass {
 
   private direction(from: SurfaceGrid, to: SurfaceGrid, slot: number): Direction {
     const device = this.device;
-    const { STORAGE, UNIFORM, COPY_DST, COPY_SRC } = GPUBufferUsage;
+    const { STORAGE, UNIFORM, COPY_SRC } = GPUBufferUsage;
     const count = from.sampleCount;
-    const distances = device.createBuffer({ label: 'sample distances', size: count * 4, usage: STORAGE | COPY_SRC });
-    const weights = device.createBuffer({ label: 'sample weights', size: count * 4, usage: STORAGE | COPY_SRC });
-    const distanceParams = device.createBuffer({ label: 'distance params', size: 16, usage: UNIFORM | COPY_DST });
-    device.queue.writeBuffer(distanceParams, 0, new Uint32Array([from.resU, from.resV, to.resU, to.resV]));
-    const reduceParams = device.createBuffer({ label: 'reduce params', size: 8, usage: UNIFORM | COPY_DST });
-    device.queue.writeBuffer(reduceParams, 0, new Uint32Array([count, slot]));
+    const buffers = new BufferSet(device);
+    const distances = buffers.create('sample distances', STORAGE | COPY_SRC, count * 4);
+    const weights = buffers.create('sample weights', STORAGE | COPY_SRC, count * 4);
+    const distanceParams = buffers.create('distance params', UNIFORM, new Uint32Array([from.resU, from.resV, to.resU, to.resV]));
+    const reduceParams = buffers.create('reduce params', UNIFORM, new Uint32Array([count, slot]));
 
     const group = (pipeline: GPUComputePipeline, buffers: GPUBuffer[]) => device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
@@ -134,7 +134,7 @@ export class ErrorPass {
       sampleCount: count,
       distanceGroup: group(this.distancePipeline, [distanceParams, from.positions, to.positions, distances, weights]),
       reduceGroup: group(this.reducePipeline, [reduceParams, distances, weights, this.results]),
-      buffers: [distances, weights, distanceParams, reduceParams],
+      buffers,
     };
   }
 
@@ -175,7 +175,7 @@ export class ErrorPass {
   destroy(): void {
     this.target?.destroy();
     this.learner?.destroy();
-    for (const d of this.directions) for (const b of d.buffers) b.destroy();
+    for (const d of this.directions) d.buffers.destroy();
     this.results.destroy();
   }
 }

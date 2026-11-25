@@ -3,9 +3,11 @@
 Learning NURBS surfaces by reshaping target shapes in WebGPU.
 Applied Computer Graphics, Fall 2026, course project.
 
-This first commit draws a flat plane and its 6 × 6 control points with WebGPU.
-Drag to rotate the view (arcball camera) and scroll to zoom. There are no other
-controls yet.
+The learner reshapes a NURBS surface (blue) until it matches a Target (orange). The editor
+evaluates the surfaces on the GPU, and the Shape distance between them is measured on the GPU
+too. The plan is in [docs/PLAN.md](docs/PLAN.md), the terms in [GLOSSARY.md](GLOSSARY.md),
+the decisions in [docs/adr](docs/adr/). Pick a Level in the side panel or open one directly,
+for example `?task=house`.
 
 ## Run
 
@@ -35,12 +37,20 @@ are imported with `?raw`.
 
 | File | Content |
 | --- | --- |
-| `src/main.ts` | Buffers, pipelines and the frame loop |
-| `src/controlNet.ts` | The flat 6 × 6 control net |
-| `src/arcball.ts` | Arcball camera |
-| `src/webgpu-init.ts` | Adapter and device setup, canvas resize (from the course examples) |
-| `src/shaders/plane.wgsl` | The plane through the corner control points |
-| `src/shaders/points.wgsl` | Control points as round dots, read from the storage buffer |
+| `src/main.ts` | Pipelines, editing, loading a Task, the frame loop |
+| `src/target.ts` | Tasks: Target, starting Learner surface, allowed tools (one Layout per Level, ADR 0001) |
+| `src/shapes.ts` | The library of 11 Targets, from leaf to car |
+| `src/controlNet.ts`, `src/nurbs.ts` | The control net and the NURBS evaluation on the CPU |
+| `src/samples.ts` | Where surfaces are sampled: a uniform grid plus the knots |
+| `src/surfaceGrid.ts` | One surface evaluated on the GPU on a grid (`shaders/tessellate.wgsl`) |
+| `src/surfaceGpu.ts` | A drawn surface: render grid, control points, polygon, stems |
+| `src/shapeDistance.ts` | Shape distance on the CPU, the reference (ADR 0002) |
+| `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`) |
+| `src/shapeChecks.ts` | Checks for the shape library (also run by `npm test`) |
+| `src/courseModels.ts` | Loads the course test models from `test-models/` |
+| `src/pointDrag.ts`, `src/arcball.ts` | Picking and dragging control points, the camera |
+| `src/paramSpace.ts`, `src/partition.ts`, `src/mathPanel.ts`, `src/walkers.ts` | The side panel views |
+| `*.test.ts`, `*.gpu.test.ts` | Tests in Node and in headless Chromium with WebGPU |
 
 The control points sit in a storage buffer as `array<vec4f>` (w·x, w·y, w·z, w)
-with index `j * countU + i`, so the tessellation compute pass can read them next.
+with index `j * countU + i`.

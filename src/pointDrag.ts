@@ -28,10 +28,11 @@ export interface DragCallbacks {
 export class PointDragger {
   enabled = false;
   selected = new Set<number>(); // indices j * countU + i
+  allowMove = true;             // false: points can be selected (for weights) but not moved
+  net: ControlNet;              // replaced when a Level loads or the Layout changes
 
   private canvas: HTMLCanvasElement;
   private camera: ArcballCamera;
-  private net: ControlNet;
   private callbacks: DragCallbacks;
 
   private hoverAxis = -1;
@@ -60,7 +61,7 @@ export class PointDragger {
 
   // the three arrows, or null if there is nothing to show
   gizmo(): Gizmo | null {
-    if (!this.enabled || this.selected.size === 0) return null;
+    if (!this.enabled || !this.allowMove || this.selected.size === 0) return null;
     const origin = this.centre();
     return { origin, length: this.arrowLength(origin), axis: this.axisDrag ? this.axisDrag.axis : this.hoverAxis };
   }
@@ -236,7 +237,7 @@ export class PointDragger {
 
   // arrow under the mouse (0 = x, 1 = y, 2 = z), or -1
   private pickAxis(e: PointerEvent): number {
-    if (this.selected.size === 0) return -1;
+    if (!this.allowMove || this.selected.size === 0) return -1;
     const o = this.centre();
     const length = this.arrowLength(o);
     const [mx, my] = this.mouse(e);

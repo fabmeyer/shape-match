@@ -71,6 +71,10 @@
       width: 4.5em; padding: 3px 4px; background: #1e2027; color: inherit;
       border: 1px solid #333844; border-radius: 4px; font: inherit;
     }
+    .row select {
+      flex: 1; min-width: 0; padding: 4px 6px; background: #1e2027; color: #e6e8ec;
+      border: 1px solid #333844; border-radius: 4px; font: inherit;
+    }
     #uvCanvas { width: 100%; aspect-ratio: 1; display: block; touch-action: none; cursor: crosshair; }
     canvas.partition { width: 100%; height: 130px; display: block; touch-action: none; cursor: ew-resize; margin: 4px 0 6px; }
 
@@ -151,6 +155,13 @@
   </div>
 
   <aside id="side">
+    <section>
+      <label class="row muted" title="Pick a Level (stand-in for the Board until the game screens exist)">
+        Level
+        <select id="taskSelect"></select>
+      </label>
+    </section>
+
     <section>
       <h2 id="taskTitle">Task</h2>
       <p id="taskText"></p>

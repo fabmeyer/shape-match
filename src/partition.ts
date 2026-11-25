@@ -48,6 +48,14 @@ export class PartitionView {
     new ResizeObserver(() => this.draw()).observe(canvas);
   }
 
+  // a new Layout: other basis functions
+  setBasis(count: number, degree: number, knots: number[]): void {
+    this.count = count;
+    this.degree = degree;
+    this.knots = knots;
+    this.draw();
+  }
+
   private drag(e: PointerEvent) {
     const r = this.canvas.getBoundingClientRect();
     const plotWidth = r.width - PAD.left - PAD.right;

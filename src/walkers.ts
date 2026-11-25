@@ -7,7 +7,7 @@ import type { ControlNet } from './controlNet.ts';
 import { basisFuns, findSpan } from './nurbs.ts';
 
 const SAMPLES = 64;               // line segments per curve
-export const MAX_SEGMENTS = 1024; // size of the GPU buffer
+export const MAX_SEGMENTS = 4096; // size of the GPU buffer: (rows + 1) x 64 curve pieces, enough for the car (25 rows)
 
 // one line segment for curves.wgsl: a (xyz, width in px), b (xyz, 1 = dashed), colour (rgba)
 export const SEGMENT_FLOATS = 12;

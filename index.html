@@ -109,6 +109,7 @@
     @keyframes ready-glow { 50% { box-shadow: 0 3px 0 #b8741a, 0 0 14px 2px rgba(245, 197, 66, 0.55); } }
     @media (prefers-reduced-motion: reduce) { .hand-in.ready { animation: none; } .meter-fill { transition: none; } }
 
+    .task-tools { font-size: 12px; }
     .report-text { width: 100%; box-sizing: border-box; font: 11px ui-monospace, monospace; background: #1e2027; color: #c9ccd3; border: 1px solid #333844; border-radius: 4px; }
     .panel-button {
       padding: 5px 10px; border: 1px solid #333844; border-radius: 5px;
@@ -216,6 +217,7 @@
     <section id="taskPanel">
       <h2 id="taskTitle">Task</h2>
       <p id="taskText"></p>
+      <p id="taskTools" class="muted task-tools"></p>
       <div class="match">
         <div class="match-label"><span>Match</span><span id="matchValue">…</span></div>
         <div class="meter" role="presentation">
@@ -236,8 +238,8 @@
       <p id="selectionInfo" class="muted"></p>
       <label class="row">
         Weight w
-        <input id="weight" type="range" min="0.1" max="5" step="0.05" value="1" disabled>
-        <input id="weightNumber" type="number" min="0.1" max="5" step="0.05" value="1" disabled aria-label="Weight">
+        <input id="weight" type="range" min="-2.303" max="1.609" step="0.001" value="0" disabled title="Exponential: log(w), from 0.1 to 5">
+        <input id="weightNumber" type="number" min="0.1" max="5" step="0.001" value="1" disabled aria-label="Weight">
       </label>
     </section>
 

@@ -53,11 +53,11 @@ const CIRCLE_KNOTS = [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1];
 // ---------------------------------------------------------
 
 // profile point in the (r, z) half-plane, with its own weight
-interface ProfilePoint { r: number; z: number; w?: number }
+export interface ProfilePoint { r: number; z: number; w?: number }
 
 // turns the profile once around the z axis: u goes around (the circle), v along the profile
 // a profile that starts and ends on the axis (r = 0) gives a closed surface
-function revolve(profile: ProfilePoint[], q: number, knotsV = clampedUniformKnots(profile.length, q)): ControlNet {
+export function revolve(profile: ProfilePoint[], q: number, knotsV = clampedUniformKnots(profile.length, q)): ControlNet {
   const rows = profile.map(({ r, z, w = 1 }) => CIRCLE.map(([cx, cy], i) => ({
     x: r * cx, y: r * cy, z, w: w * CIRCLE_W[i],
   })));

@@ -14,6 +14,28 @@ import reduceCode from './shaders/reduce.wgsl?raw';
 
 const DISTANCE_WORKGROUP = 64; // @workgroup_size in distance.wgsl
 
+// compiling the compute pipelines takes about a second, so every device compiles them once
+// and every ErrorPass on it (the live one, one per Level calibration) shares them
+interface ErrorPipelines {
+  distance: GPUComputePipeline;
+  reduce: GPUComputePipeline;
+}
+const pipelineCache = new WeakMap<GPUDevice, ErrorPipelines>();
+
+function errorPipelines(device: GPUDevice): ErrorPipelines {
+  let cached = pipelineCache.get(device);
+  if (!cached) {
+    const pipeline = (label: string, code: string) => device.createComputePipeline({
+      label,
+      layout: 'auto',
+      compute: { module: device.createShaderModule({ label, code }), entryPoint: 'cs_main' },
+    });
+    cached = { distance: pipeline('distance', distanceCode), reduce: pipeline('reduce distances', reduceCode) };
+    pipelineCache.set(device, cached);
+  }
+  return cached;
+}
+
 export interface GpuShapeDistance {
   rms: number;       // / diagonal, like shapeDistance()
   hausdorff: number; // / diagonal
@@ -50,13 +72,9 @@ export class ErrorPass {
   constructor(device: GPUDevice, tessellatePipeline = createTessellatePipeline(device)) {
     this.device = device;
     this.tessellatePipeline = tessellatePipeline;
-    const pipeline = (label: string, code: string) => device.createComputePipeline({
-      label,
-      layout: 'auto',
-      compute: { module: device.createShaderModule({ label, code }), entryPoint: 'cs_main' },
-    });
-    this.distancePipeline = pipeline('distance', distanceCode);
-    this.reducePipeline = pipeline('reduce distances', reduceCode);
+    const { distance, reduce } = errorPipelines(device);
+    this.distancePipeline = distance;
+    this.reducePipeline = reduce;
     this.results = device.createBuffer({
       label: 'distance sums',
       size: 2 * 16,

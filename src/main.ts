@@ -8,7 +8,7 @@ import { evaluate } from './nurbs.ts';
 import { ParamSpaceView } from './paramSpace.ts';
 import { PartitionView } from './partition.ts';
 import { updateMathPanel } from './mathPanel.ts';
-import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task } from './target.ts';
+import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, toolsText, type Task } from './target.ts';
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
 import { Grader, type Measurement } from './grader.ts';
@@ -504,6 +504,13 @@ window.addEventListener('keydown', (e) => {
 const WEIGHT_MIN = 0.1; // weights must stay > 0
 const WEIGHT_MAX = 5;
 
+// the slider is exponential (as in Shene's curve tool): it moves log(w), so the range 0.1 ... 1 gets as
+// much room as 1 ... 5 and small weights like √2/2 can be set precisely; the number field stays linear
+weightSlider.min = String(Math.log(WEIGHT_MIN));
+weightSlider.max = String(Math.log(WEIGHT_MAX));
+weightSlider.step = '0.001';
+const sliderValue = (w: number) => String(Math.log(w));
+
 function updateWeightPanel() {
   const selected = [...visibleSelection()];
   weightSlider.disabled = weightNumber.disabled = selected.length === 0 || !task.tools.weights;
@@ -511,7 +518,7 @@ function updateWeightPanel() {
     selectionInfo.textContent = mode === 'select'
       ? 'Click a control point. Shift+click adds one, dragging on empty space selects with a rectangle.'
       : showPoints ? 'Switch to Select to pick control points.' : 'Switch Points on to pick control points.';
-    weightSlider.value = '1';
+    weightSlider.value = sliderValue(1);
     weightNumber.value = '';
     return;
   }
@@ -524,8 +531,8 @@ function updateWeightPanel() {
     const same = weights.every((w) => Math.abs(w - weights[0]) < 1e-6);
     selectionInfo.textContent = `${selected.length} points selected` + (same ? '' : ', with different weights');
   }
-  weightSlider.value = String(weights[0]);
-  if (document.activeElement !== weightNumber) weightNumber.value = weights[0].toFixed(2); // don't overwrite while typing
+  weightSlider.value = sliderValue(weights[0]);
+  if (document.activeElement !== weightNumber) weightNumber.value = weights[0].toFixed(3); // don't overwrite while typing
 }
 
 // one drag of the slider (or one edit of the number) is one undo step
@@ -541,8 +548,9 @@ function setWeights(value: number) {
   pointsChanged();
 }
 
+weightSlider.addEventListener('input', () => setWeights(Math.exp(Number(weightSlider.value))));
+weightNumber.addEventListener('input', () => setWeights(Number(weightNumber.value)));
 for (const input of [weightSlider, weightNumber]) {
-  input.addEventListener('input', () => setWeights(Number(input.value)));
   input.addEventListener('change', () => {
     weightEditing = false;
     updateWeightPanel();
@@ -600,7 +608,7 @@ function loadTask(next: Task) {
   task = next;
   lastMeasurement = undefined;
   debugLog.log('level', { id: task.id, title: task.title });
-  taskPanel.setTask(task.title, task.text);
+  taskPanel.setTask(task.title, task.text, toolsText(task.tools));
   dragger.allowMove = task.tools.movePoints;
 
   target?.destroy();

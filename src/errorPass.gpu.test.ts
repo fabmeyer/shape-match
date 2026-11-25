@@ -5,6 +5,8 @@ import { ErrorPass, measureLevel } from './errorPass.ts';
 import { shapeDistance } from './shapeDistance.ts';
 import { allShapes } from './shapes.ts';
 import { allTasks, cloneNet } from './target.ts';
+import { calibrate, grade, gradingConfig } from './grading.ts';
+import { ERROR_RES } from './shapeDistance.ts';
 import { readBuffer, requestTestDevice } from './gpuTesting.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
 
@@ -111,5 +113,22 @@ describe('error pass', () => {
       expectClose(gpu.rms, shapeDistance(target, learner, { res }).rms);
     }
     pass.resolution = RES;
+  });
+});
+
+// every Level as the app grades it: on the GPU, on the app's error grid (the Noise floor, and so τ,
+// depends on the grid: on coarser grids the start of Level 1 or Level 3 would already get a Star)
+describe('every Task', () => {
+  let tessellate: GPUComputePipeline;
+  beforeAll(() => { tessellate = createTessellatePipeline(device); });
+  it.each(allTasks())('$id: the start gives 0 Stars, the Target 3 Stars', async (task) => {
+    const config = gradingConfig(task.grading);
+    const level = await measureLevel(device, tessellate, task.target, task.start, ERROR_RES);
+    const calibration = calibrate(level.noise, level.start, config);
+    expect(grade(level.start, calibration, config).stars).toBe(0);
+    pass.resolution = ERROR_RES;
+    pass.setTarget(task.target);
+    pass.setLearner(task.target);
+    expect(grade(await pass.measure(), calibration, config).stars).toBe(3);
   });
 });

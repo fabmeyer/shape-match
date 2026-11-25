@@ -84,21 +84,26 @@ const cameraBuffer = device.createBuffer({
 const tessellatePipeline = createTessellatePipeline(device);
 
 const surfaceModule = device.createShaderModule({ label: 'surface', code: surfaceCode });
-const surfacePipeline = device.createRenderPipeline({
-  label: 'surface',
-  layout: 'auto',
-  vertex: {
-    module: surfaceModule,
-    entryPoint: 'vs_main',
-    buffers: [
-      { arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }, // positions
-      { arrayStride: 16, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x4' }] }, // normals
-    ],
-  },
-  fragment: { module: surfaceModule, entryPoint: 'fs_main', targets: [{ format }] },
-  primitive: { topology: 'triangle-list', cullMode: 'none' },
-  depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
-});
+// two pipelines from the same shader: the plain surface, and the Learner surface with the heatmap
+function surfacePipelineWith(fragment: 'fs_main' | 'fs_heat'): GPURenderPipeline {
+  return device.createRenderPipeline({
+    label: fragment === 'fs_heat' ? 'surface with heatmap' : 'surface',
+    layout: 'auto',
+    vertex: {
+      module: surfaceModule,
+      entryPoint: 'vs_main',
+      buffers: [
+        { arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }, // positions (and u)
+        { arrayStride: 16, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x4' }] }, // normals (and v)
+      ],
+    },
+    fragment: { module: surfaceModule, entryPoint: fragment, targets: [{ format }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+  });
+}
+const surfacePipeline = surfacePipelineWith('fs_main');
+const surfaceHeatPipeline = surfacePipelineWith('fs_heat');
 
 const pointsModule = device.createShaderModule({ label: 'points', code: pointsCode });
 const pointsPipeline = device.createRenderPipeline({
@@ -161,6 +166,7 @@ const curvesBehindPipeline = curvesPipeline(true);
 const pipelines: SurfacePipelines = {
   tessellate: tessellatePipeline,
   surface: surfacePipeline,
+  surfaceHeat: surfaceHeatPipeline,
   points: pointsPipeline,
   polygon: polygonPipeline,
   stems: stemsPipeline,
@@ -254,6 +260,7 @@ grader.onError = (e) => {
 let lastMeasurement: Measurement | undefined;
 grader.onMeasured = (m) => {
   if (m.grade && m.starMarks) taskPanel.show(m.grade, m.starMarks);
+  setHeatScale(m.heat);
   showMeasurement(m);
   // a drag measures many times: the log gets an entry when the Stars change, the report the last one
   if (m.grade && m.grade.stars !== lastMeasurement?.grade?.stars) {
@@ -262,6 +269,46 @@ grader.onMeasured = (m) => {
   lastMeasurement = m;
 };
 const round = (x: number, digits = 3) => Number(x.toFixed(digits));
+
+// ---------------------------------------------------------
+// Heatmap: the Learner surface coloured by its distance to the Target (surface.wgsl, fs_heat)
+// reads the per-sample distances of the error pass straight from the GPU; its scale comes with every grade
+// ---------------------------------------------------------
+
+let showHeatmap = true;
+const heatParams = new ArrayBuffer(16); // struct Heat: resU, resV (u32), cold, hot (f32, world units)
+const heatInts = new Uint32Array(heatParams);
+const heatFloats = new Float32Array(heatParams);
+const heatBuffer = device.createBuffer({ label: 'heat params', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+let heatScaleKnown = false; // only after the Level is calibrated
+let heatGroup: GPUBindGroup | undefined;
+let heatGroupRevision = -1;
+
+function setHeatScale(scale: Measurement['heat']) {
+  heatScaleKnown = scale !== undefined;
+  if (!scale) return;
+  heatFloats[2] = scale.cold;
+  heatFloats[3] = scale.hot;
+  device.queue.writeBuffer(heatBuffer, 0, heatParams);
+}
+
+// the bind group follows the error pass's buffers, which a new Level, Layout or grid replaces
+function currentHeatGroup(): GPUBindGroup | undefined {
+  if (!showHeatmap || !heatScaleKnown) return undefined;
+  if (grader.heatRevision !== heatGroupRevision) {
+    const source = grader.heatSource;
+    if (!source) return undefined;
+    heatInts[0] = source.resU;
+    heatInts[1] = source.resV;
+    device.queue.writeBuffer(heatBuffer, 0, heatParams);
+    heatGroup = device.createBindGroup({
+      layout: surfaceHeatPipeline.getBindGroupLayout(1),
+      entries: [heatBuffer, source.samples, source.distances].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    });
+    heatGroupRevision = grader.heatRevision;
+  }
+  return heatGroup;
+}
 
 const taskPanel = new TaskPanel();
 taskPanel.onHandIn = handIn;
@@ -452,7 +499,7 @@ async function copyDebugReport() {
     state: {
       mode,
       camera: { view: camera.view, target: [...camera.target], distance: camera.distance, orientation: [...camera.orientation] },
-      switches: { showPoints, showPolygon, showSolution, showWalkers, showMarker },
+      switches: { showPoints, showPolygon, showSolution, showWalkers, showMarker, showHeatmap },
       errorGrid: grader.resolution,
       calibration: lastMeasurement?.calibration,
       lastMeasurement: lastMeasurement && { distance: lastMeasurement.distance, grade: lastMeasurement.grade },
@@ -607,6 +654,7 @@ function setLearner(next: ControlNet) {
 function loadTask(next: Task) {
   task = next;
   lastMeasurement = undefined;
+  heatScaleKnown = false; // the new Level's scale comes with its calibration
   debugLog.log('level', { id: task.id, title: task.title });
   taskPanel.setTask(task.title, task.text, toolsText(task.tools));
   dragger.allowMove = task.tools.movePoints;
@@ -676,6 +724,8 @@ const polygonSwitch = document.getElementById('togglePolygon') as HTMLInputEleme
 polygonSwitch.addEventListener('change', () => { showPolygon = polygonSwitch.checked; });
 const solutionSwitch = document.getElementById('toggleSolution') as HTMLInputElement;
 solutionSwitch.addEventListener('change', () => { showSolution = solutionSwitch.checked; });
+const heatmapSwitch = document.getElementById('toggleHeatmap') as HTMLInputElement;
+heatmapSwitch.addEventListener('change', () => { showHeatmap = heatmapSwitch.checked; });
 const markerSwitch = document.getElementById('toggleMarker') as HTMLInputElement;
 markerSwitch.addEventListener('change', () => {
   showMarker = markerSwitch.checked;
@@ -745,7 +795,7 @@ function frame() {
     },
   });
 
-  learnerGpu.drawSurface(pass);
+  learnerGpu.drawSurface(pass, currentHeatGroup());
   targetGpu.drawSurface(pass);
 
   if (showWalkers) {

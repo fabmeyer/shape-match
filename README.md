@@ -58,7 +58,7 @@ are imported with `?raw`.
 | `src/surfaceGrid.ts` | One surface evaluated on the GPU on a grid (`shaders/tessellate.wgsl`) |
 | `src/surfaceGpu.ts` | A drawn surface: render grid, control points, polygon, stems |
 | `src/shapeDistance.ts` | Shape distance on the CPU, the reference (ADR 0002) |
-| `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`) |
+| `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`); its per-sample distances feed the heatmap (`fs_heat` in `shaders/surface.wgsl`) |
 | `src/grading.ts` | Grading rules: Tolerance, Stars, Passed, Match (pure, one config) |
 | `src/grader.ts` | Live grading on the Workbench and the Shape match check of a Hand-in |
 | `src/taskPanel.ts` | Task panel: Match meter, live Stars, Hand in button |

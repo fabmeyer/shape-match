@@ -132,6 +132,7 @@ fn cs_main(@builtin(global_invocation_id) id : vec3u) {
   let v = samples[params.resU + id.y];
   let sample = surfaceSample(u, v);
   let index = id.y * params.resU + id.x;
-  positions[index] = vec4f(sample.point, 1.0);
-  normals[index] = vec4f(sample.normal, 0.0);
+  // the 4th components carry the parameters (u, v) of the sample, for the heatmap in surface.wgsl
+  positions[index] = vec4f(sample.point, u);
+  normals[index] = vec4f(sample.normal, v);
 }

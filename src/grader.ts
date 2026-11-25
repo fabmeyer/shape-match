@@ -4,7 +4,7 @@
 //   update():  once per frame. Starts a measurement if the net changed and none is on its way
 //   check():   the Shape match check. A fresh measurement of the surface as it is now, after the calibration
 import type { ControlNet } from './controlNet.ts';
-import { ErrorPass, measureLevel, type GpuShapeDistance } from './errorPass.ts';
+import { ErrorPass, measureLevel, type GpuShapeDistance, type HeatSource } from './errorPass.ts';
 import { debugLog } from './debugLog.ts';
 import { calibrate, grade, gradingConfig, starMarks, type Calibration, type Grade, type GradingConfig } from './grading.ts';
 
@@ -13,6 +13,7 @@ export interface Measurement {
   grade?: Grade;     // missing while the Level is still calibrating
   calibration?: Calibration;
   starMarks?: [number, number]; // Match where 1★ and 2★ begin
+  heat?: { cold: number; hot: number }; // heatmap scale in world units: within τ is cold, the 1★ limit is hot
   ms: number;        // round trip to the GPU and back
 }
 
@@ -66,9 +67,14 @@ export class Grader {
     this.dirty = true;
   }
 
-  // per sample of the Learner surface: its distance to the Target (for the heatmap)
-  get learnerDistances(): GPUBuffer | undefined {
-    return this.pass.learnerDistances;
+  // the learner's error grid with the distance of every sample (for the heatmap); its buffers are
+  // replaced when the revision changes
+  get heatSource(): HeatSource | undefined {
+    return this.pass.heatSource;
+  }
+
+  get heatRevision(): number {
+    return this.pass.revision;
   }
 
   // call once per frame: at most one measurement at a time; changes made meanwhile are measured right after it
@@ -99,6 +105,10 @@ export class Grader {
       calibration,
       grade: calibration && grade(distance, calibration, this.config),
       starMarks: calibration && starMarks(calibration, this.config),
+      heat: calibration && {
+        cold: calibration.tolerance * distance.diagonal,
+        hot: this.config.star1Factor * calibration.tolerance * distance.diagonal,
+      },
       ms: performance.now() - start,
     };
   }

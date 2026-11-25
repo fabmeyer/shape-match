@@ -12,6 +12,7 @@ import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
 import { Grader, type Measurement } from './grader.ts';
+import { TaskPanel } from './taskPanel.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
@@ -233,7 +234,26 @@ const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphEle
 const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
 errorResSelect.addEventListener('change', () => { grader.resolution = Number(errorResSelect.value); });
 grader.onError = (e) => { distanceInfo.textContent = `Error pass failed: ${e}`; };
-grader.onMeasured = showMeasurement;
+grader.onMeasured = (m) => {
+  if (m.grade && m.starMarks) taskPanel.show(m.grade, m.starMarks);
+  showMeasurement(m);
+};
+
+const taskPanel = new TaskPanel();
+taskPanel.onHandIn = handIn;
+
+// Hand-in: the Shape match check on the surface as it is now
+async function handIn() {
+  taskPanel.setChecking(true);
+  try {
+    const { grade } = await grader.check();
+    taskPanel.showHandIn(grade);
+  } catch (e) {
+    distanceInfo.textContent = `Shape match check failed: ${e}`;
+  } finally {
+    taskPanel.setChecking(false);
+  }
+}
 
 // developer readout: the raw numbers behind the Match meter
 function showMeasurement({ distance: d, grade, calibration, ms }: Measurement) {
@@ -392,6 +412,14 @@ function resetPoints() {
   pointsChanged();
 }
 
+// developer: the learner's surface becomes the Target, to try Hand in and the Result screen
+document.getElementById('snapSolution')!.addEventListener('click', () => {
+  if (!sameLayout(net, task.target)) return;
+  beginEdit();
+  net.points.set(task.target.points);
+  pointsChanged();
+});
+
 undoButton.addEventListener('click', undo);
 document.getElementById('reset')!.addEventListener('click', resetPoints);
 window.addEventListener('keydown', (e) => {
@@ -504,8 +532,7 @@ function setLearner(next: ControlNet) {
 
 function loadTask(next: Task) {
   task = next;
-  document.getElementById('taskTitle')!.textContent = task.title;
-  document.getElementById('taskText')!.textContent = task.text;
+  taskPanel.setTask(task.title, task.text);
   dragger.allowMove = task.tools.movePoints;
 
   target?.destroy();

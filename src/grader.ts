@@ -5,12 +5,13 @@
 //   check():   the Shape match check. A fresh measurement of the surface as it is now, after the calibration
 import type { ControlNet } from './controlNet.ts';
 import { ErrorPass, measureLevel, type GpuShapeDistance } from './errorPass.ts';
-import { calibrate, grade, gradingConfig, type Calibration, type Grade, type GradingConfig } from './grading.ts';
+import { calibrate, grade, gradingConfig, starMarks, type Calibration, type Grade, type GradingConfig } from './grading.ts';
 
 export interface Measurement {
   distance: GpuShapeDistance;
   grade?: Grade;     // missing while the Level is still calibrating
   calibration?: Calibration;
+  starMarks?: [number, number]; // Match where 1★ and 2★ begin
   ms: number;        // round trip to the GPU and back
 }
 
@@ -96,6 +97,7 @@ export class Grader {
       distance,
       calibration,
       grade: calibration && grade(distance, calibration, this.config),
+      starMarks: calibration && starMarks(calibration, this.config),
       ms: performance.now() - start,
     };
   }

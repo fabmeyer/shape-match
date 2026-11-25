@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calibrate, DEFAULT_GRADING, grade, gradingConfig, matchPercent, type Calibration } from './grading.ts';
+import { calibrate, DEFAULT_GRADING, grade, gradingConfig, matchPercent, starMarks, type Calibration } from './grading.ts';
 import { shapeDistance } from './shapeDistance.ts';
 import { allTasks } from './target.ts';
 
@@ -55,6 +55,15 @@ describe('matchPercent', () => {
     const a = matchPercent(0.1, c) - matchPercent(0.2, c);
     const b = matchPercent(0.025, c) - matchPercent(0.05, c);
     expect(a).toBeCloseTo(b, 10);
+  });
+});
+
+describe('starMarks', () => {
+  it('puts the 1 and 2 Star thresholds on the meter, in order', () => {
+    const [one, two] = starMarks(c);
+    expect(one).toBeCloseTo(matchPercent(0.02, c), 10);
+    expect(two).toBeCloseTo(matchPercent(0.006, c), 10);
+    expect(0 < one && one < two && two < 100).toBe(true);
   });
 });
 

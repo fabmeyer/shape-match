@@ -75,6 +75,39 @@
       flex: 1; min-width: 0; padding: 4px 6px; background: #1e2027; color: #e6e8ec;
       border: 1px solid #333844; border-radius: 4px; font: inherit;
     }
+    /* Task panel: Match meter, live Stars, Hand in */
+    .match { margin: 10px 0 6px; }
+    .match-label { display: flex; justify-content: space-between; font-size: 12px; color: #9aa0aa; margin-bottom: 4px; }
+    #matchValue { color: #e6e8ec; font-variant-numeric: tabular-nums; font-weight: 600; }
+    .meter { position: relative; height: 12px; background: #2a2e38; border-radius: 6px; overflow: visible; }
+    .meter-fill {
+      height: 100%; width: 0; border-radius: 6px; transition: width 0.35s ease-out, background 0.35s;
+      background: linear-gradient(90deg, #3b6fd8, #4fb3d9);
+    }
+    .meter-fill[data-stars="1"] { background: linear-gradient(90deg, #3b6fd8, #e2c044); }
+    .meter-fill[data-stars="2"] { background: linear-gradient(90deg, #4fb3d9, #f0a030); }
+    .meter-fill[data-stars="3"] { background: linear-gradient(90deg, #e2c044, #f2682e); }
+    .meter-mark {
+      position: absolute; top: 14px; transform: translateX(-50%); font-size: 9px; line-height: 1;
+      color: #9aa0aa; white-space: nowrap;
+    }
+    .meter-mark::before { content: ""; position: absolute; left: 50%; top: -14px; width: 1px; height: 12px; background: #16181d; }
+    .stars-row { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 0 10px; }
+    .live-stars { font-size: 22px; letter-spacing: 2px; color: #5c606b; }
+    .live-stars[data-stars="1"], .live-stars[data-stars="2"], .live-stars[data-stars="3"] { color: #f5c542; }
+    .hand-in {
+      width: 100%; padding: 10px; border: 0; border-radius: 8px; cursor: pointer;
+      font: 600 15px system-ui, sans-serif; color: #fff; background: #4a7bd0;
+      box-shadow: 0 3px 0 #2f569b; transition: transform 0.08s, box-shadow 0.08s;
+    }
+    .hand-in:hover:not(:disabled) { background: #5a8be0; }
+    .hand-in:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 #2f569b; }
+    .hand-in:disabled { background: #333844; color: #8a8f99; box-shadow: none; cursor: default; }
+    .hand-in.ready { background: #f2a62e; color: #2a1a00; box-shadow: 0 3px 0 #b8741a; animation: ready-glow 1.4s ease-in-out infinite; }
+    .hand-in.ready:hover { background: #f7b84a; }
+    @keyframes ready-glow { 50% { box-shadow: 0 3px 0 #b8741a, 0 0 14px 2px rgba(245, 197, 66, 0.55); } }
+    @media (prefers-reduced-motion: reduce) { .hand-in.ready { animation: none; } .meter-fill { transition: none; } }
+
     .panel-button {
       padding: 5px 10px; border: 1px solid #333844; border-radius: 5px;
       background: #1e2027; color: #c9ccd3; font: inherit; cursor: pointer;
@@ -173,22 +206,22 @@
       </label>
     </section>
 
-    <section>
+    <section id="taskPanel">
       <h2 id="taskTitle">Task</h2>
       <p id="taskText"></p>
-    </section>
-
-    <section>
-      <h2>Shape distance <span class="muted">(dev)</span></h2>
-      <p id="distanceInfo" class="muted">Measuring…</p>
-      <label class="row muted" title="Samples per direction of the error grid (the knots are added)">
-        Error grid
-        <select id="errorRes">
-          <option value="32">32 × 32</option>
-          <option value="64" selected>64 × 64</option>
-          <option value="128">128 × 128</option>
-        </select>
-      </label>
+      <div class="match">
+        <div class="match-label"><span>Match</span><span id="matchValue">…</span></div>
+        <div class="meter" role="presentation">
+          <div id="matchFill" class="meter-fill"></div>
+          <span id="mark1" class="meter-mark" title="1 Star from here" hidden>★</span>
+          <span id="mark2" class="meter-mark" title="2 Stars from here" hidden>★★</span>
+        </div>
+      </div>
+      <div class="stars-row">
+        <span id="liveStars" class="live-stars" title="Stars your surface would get now">☆☆☆</span>
+        <span id="bestStars" class="muted">No hand-in yet</span>
+      </div>
+      <button id="handIn" class="hand-in" disabled>Calibrating…</button>
     </section>
 
     <section>
@@ -294,6 +327,21 @@
         <p class="muted">u<sub>i</sub> are the knots. A fraction with denominator 0 counts as 0.</p>
       </details>
       <div id="mathValues"></div>
+      </details>
+    </section>
+    <section>
+      <details id="devPanel" class="section">
+        <summary>Developer</summary>
+        <p id="distanceInfo" class="muted">Measuring…</p>
+        <p><button id="snapSolution" class="panel-button" title="Set your surface to the Target (can be undone), to try Hand in and the Result screen">Snap to solution</button></p>
+        <label class="row muted" title="Samples per direction of the error grid (the knots are added)">
+          Error grid
+          <select id="errorRes">
+            <option value="32">32 × 32</option>
+            <option value="64" selected>64 × 64</option>
+            <option value="128">128 × 128</option>
+          </select>
+        </label>
       </details>
     </section>
   </aside>

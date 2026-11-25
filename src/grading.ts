@@ -71,3 +71,8 @@ export function matchPercent(rms: number, c: Calibration): number {
   const t = Math.log(c.startRms / rms) / Math.log(c.startRms / c.tolerance);
   return 100 * Math.min(1, Math.max(0, t));
 }
+
+// where the Match meter crosses into 1★ and 2★ (3★ is at 100 %), for the marks on the meter
+export function starMarks(c: Calibration, config = DEFAULT_GRADING): [number, number] {
+  return [matchPercent(config.star1Factor * c.tolerance, c), matchPercent(config.star2Factor * c.tolerance, c)];
+}

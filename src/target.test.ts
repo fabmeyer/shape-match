@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { allTasks, cloneNet, sameLayout, toolsText } from './target.ts';
-import { getPoint, getWeight } from './controlNet.ts';
+import { allTasks, changedStart, cloneNet, sameLayout, startChange, toolsText } from './target.ts';
+import { flatControlNet, getPoint, getWeight, setPoint } from './controlNet.ts';
 import { checkLayout } from './shapeChecks.ts';
+import { allShapes } from './shapes.ts';
 
 const tasks = allTasks();
 
@@ -76,6 +77,34 @@ describe('Level 2 (weights)', () => {
 
   it('allows changing weights only', () => {
     expect(task.tools).toEqual({ movePoints: false, weights: true, knotInsertion: false });
+  });
+});
+
+describe('starting surfaces of the library shapes', () => {
+  it('get harder step by step from the Tent on', () => {
+    expect(startChange(2)).toEqual({ squash: 0.25, stretchX: 1.3, stretchY: 1, lean: 0 });
+    expect(startChange(5)).toEqual({ squash: 0.25, stretchX: 1.3, stretchY: 0.75, lean: 0 });
+    expect(startChange(9)).toEqual({ squash: 0.25, stretchX: 1.3, stretchY: 0.75, lean: 0.35 });
+  });
+
+  it('keep the Layout and the weights of the Target', () => {
+    const shapeIds = new Set(allShapes().map((s) => s.id));
+    for (const task of tasks.filter((t) => shapeIds.has(t.id))) {
+      expect(sameLayout(task.start, task.target)).toBe(true);
+      for (let k = 0; k < task.start.countU * task.start.countV; k++) expect(getWeight(task.start, k)).toBeCloseTo(getWeight(task.target, k), 12);
+    }
+  });
+
+  it('stretch around the middle, lean with the height', () => {
+    const net = flatControlNet();
+    const k = 3 * net.countU + 2;
+    setPoint(net, k, [getPoint(net, k)[0], getPoint(net, k)[1], 1]);
+    const start = changedStart(net, { squash: 0.5, stretchX: 2, stretchY: 1, lean: 0.4 });
+    const [x, y] = getPoint(net, k);
+    const [sx, sy, sz] = getPoint(start, k);
+    expect(sx).toBeCloseTo(2 * x, 6); // the flat sheet is centred on 0
+    expect(sy).toBeCloseTo(y + 0.4, 6);
+    expect(sz).toBeCloseTo(0.5, 6);
   });
 });
 

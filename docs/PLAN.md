@@ -75,19 +75,18 @@ Each Level has its own Layout, shared by its Target and its starting Learner sur
 | 8 | cup | revolution, profile turns back | 9×7, 2×2 | wall thickness |
 | 9 | mushroom | revolution | 9×7, 2×2 | an overhang |
 | 10 | boat | loft: closed hull with deck and cabin, stem and transom | 13×9, 2×2 | a body closed at both ends, a cabin on the deck |
-| 11 | car (**final challenge**) | loft through rounded boxes with four half-cylinder wheels | 38×25, 2×2 | everything at once: flat panels, double knots for sharp edges, wheels that are only round through weights |
+| 11 | car (**final challenge**) | extrusion of the side outline: box body, trapezoid cabin, two wheel arcs | 29×4, 2×1 | everything at once: straight panels, double knots for corners, wheels that are only round through weights |
 
-**The car in detail**: it is still one surface. Each section across the car also contains the two wheel tracks at the bottom. Along the car, every piece is degree 2 with a double knot at each end, so pieces meet at sharp edges. A straight piece has its middle section halfway between its ends, which gives flat panels. A wheel is two quarter circles whose corner section has weight √2/2. The checks confirm that the wheels are round to 1e-5 (measured: 3e-8).
+**The car in detail**: kept simple, like a car drawn from basic shapes: a box for the body, a trapezoid for the cabin, two round wheels. The outline seen from the side is pushed across the car's width, like the house. The outline is degree 2 with every interior knot twice, so it is 14 pieces with sharp corners between them. A straight piece has its middle control point halfway between its ends. A wheel is two quarter circles below the body whose corner points have weight √2/2. The hood slopes more than the trunk. The checks confirm that the wheels are round to 1e-5 (measured: 2.5e-8). It has 116 control points (the first car, a loft with four separate wheels, had 950, too many to edit by hand).
 
-**Starting surface for the final challenge**: the same car with wheel depth 0. That is the same Layout, so it fits ADR 0001. The learner has to pull down the wheel sections and find the √2/2 weights. That is about 4 × 5 sections to work with, not all 950 points.
+**Starting surfaces**: from the Tent on, a shape's start is wrong in more than one direction, harder step by step (see `startChange` in `src/target.ts`): flattened and wider in x (Tent, Star, Ball), also narrower in y (Vase, House, Tree, Cup), also leaning backwards (Mushroom, Boat, Car). All of these are affine, so the start keeps the Target's Layout and weights (ADR 0001).
 
 The script checks every Layout (knot count, clamped, degree ≤ 3, weights > 0). For the closed shapes it checks that the seam closes, that the caps of the extrusions close, and that every revolution is round to 1e-5. That last check also tests `nurbs.ts`, alongside the Reference models.
 
-Not possible as one surface: a house with a separate roof, a tree with a separate trunk, a car with wheels. Those would need several patches, which are out of scope.
+Not possible as one surface: a house with a separate roof, a tree with a separate trunk, a car with four separate wheels. Those would need several patches, which are out of scope.
 
 **Finding for the evaluation**: on the house, a band of shading runs along the eaves, because the 40×40 grid doesn't put a sample exactly on the double knot. The same problem affects the Shape distance: a crease falls between samples unless the grid includes the knot values. Possible fix: always add the distinct knots to the sample positions.
 
-**Still open**: each Level also needs its *starting* Learner surface in the same Layout, for example the Target with its features flattened.
 
 ## 5. Game
 

@@ -19,7 +19,7 @@ _Avoid_: Net structure, topology
 ## Grading
 
 **Shape distance**:
-A non-negative number that says how far the Learner surface is from the Target as shapes, independent of how either is parametrised. It is measured relative to the Target's size. Lower is better, and 0 means identical.
+A non-negative number that says how far the Learner surface is from the Target as shapes, independent of how either is parametrised. It is a two-sided Chamfer distance measured to triangles (ADR 0002), relative to the Target's size. Lower is better, and 0 means identical.
 _Avoid_: Similarity, error, score
 
 **Match**:
@@ -39,12 +39,20 @@ The Shape distance a Level accepts as an exact match, set per Level from its Noi
 _Avoid_: Threshold, epsilon
 
 **Hand-in**:
-The learner's decision that their surface is finished. The Match and Stars at that moment are the result of the attempt. Grading is live before it, but only a Hand-in counts.
-_Avoid_: Submit, check, finish
+The learner's decision that their surface is finished. It runs the Shape match check and ends the attempt with its result. Grading is live before it, but only a Hand-in counts.
+_Avoid_: Submit, finish
+
+**Shape match check**:
+What a Hand-in runs: the Shape distance of the handed-in surface, computed once more, turned into Match, Stars and the verdict Passed or Not passed.
+_Avoid_: Validation, evaluation
+
+**Passed**:
+The verdict of a Shape match check with at least one Star (and the Hausdorff distance within its bound). The opposite is **Not passed**. A passing Hand-in Solves the Level and routes to the next one after a short countdown.
+_Avoid_: Correct, success
 
 **Solved**:
-A Level is solved once the learner has handed in a surface with at least one Star. Solving a Level unlocks the next one.
-_Avoid_: Done, passed, completed
+A Level is solved once the learner has handed in a surface that Passed. Solving a Level unlocks the next one.
+_Avoid_: Done, completed
 
 **Star**:
 The reward for a Level, 0 to 3, depending on the Shape distance in relation to the Tolerance. It is shown live while editing; a Hand-in records it.

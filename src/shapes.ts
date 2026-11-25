@@ -87,28 +87,6 @@ function loft(sections: LoftSection[], q: number, knotsV = clampedUniformKnots(s
   return makeNet(rows, 2, q, clampedUniformKnots(rows[0].length, 2), knotsV);
 }
 
-// the control points of a closed polygon with rounded corners, for a uniform degree-2 curve:
-// every corner C gets a point a little before it, C itself and a point a little after it,
-// so the curve runs straight along the edges and turns in a small arc near each corner.
-// the loop starts and ends in the middle of the edge from the last corner to the first one
-function roundedPolygon(corners: [number, number][], round: number): [number, number][] {
-  const n = corners.length;
-  const toward = (c: [number, number], d: [number, number]): [number, number] => {
-    const len = Math.hypot(d[0] - c[0], d[1] - c[1]);
-    const t = len > 0 ? Math.min(round, len / 2) / len : 0;
-    return [c[0] + t * (d[0] - c[0]), c[1] + t * (d[1] - c[1])];
-  };
-  const first = corners[0];
-  const last = corners[n - 1];
-  const start: [number, number] = [(first[0] + last[0]) / 2, (first[1] + last[1]) / 2];
-  const loop: [number, number][] = [start];
-  corners.forEach((c, k) => {
-    loop.push(toward(c, corners[(k + n - 1) % n]), c, toward(c, corners[(k + 1) % n]));
-  });
-  loop.push(start);
-  return loop;
-}
-
 // a section collapsed into one point: every point of the loop at the centre of the given loop
 function collapsed(loop: [number, number][]): [number, number][] {
   const n = loop.length - 1;
@@ -244,58 +222,61 @@ function boat(): ControlNet {
   ], 2);
 }
 
-// 11 · car (the final challenge): a box-like body with four half-cylinder wheels, still ONE surface.
-// u goes around each section (degree 2): the body, the cabin and, at the bottom, the two wheel tracks.
-// v runs from the nose to the tail (degree 2) in pieces, every interior knot twice (C0 between pieces):
-//   a straight piece: the middle section is the average of its two ends -> flat panels, sharp edges
-//   a wheel: two quarter circles in the yz-plane, the corner section has weight √2/2 -> exactly round.
-// Over the wheels the body stays the same, so only the wheel tracks move with the circle
+// 11 · car (the final challenge), kept simple like a car drawn from basic shapes: a box for the body,
+// a trapezoid for the cabin on top, and two round wheels. The outline seen from the side (yz-plane)
+// is pushed across the car's width (along x), like the house. The outline is degree 2 with every
+// interior knot twice (C0), so it is made of pieces with sharp corners between them:
+//   a straight piece: its middle control point halfway between its ends
+//   a wheel: two quarter circles under the body, their corner points with weight √2/2 -> exactly round
+// the hood slopes more than the trunk; nose at -y, tail at +y. 14 pieces, 29 x 4 = 116 control points
+export const CAR_WHEELS = { radius: 0.28, axle: 0.28, centres: [-0.7, 0.7] }; // the axle height = the sill
+
+interface SidePoint { y: number; z: number; w: number }
+
+// pushes a closed outline in the yz-plane (first point = last point) across x from -width/2 to +width/2
+// rows: left cap (every point at the centre of the outline), left outline, right outline, right cap
+function extrudeSide(outline: SidePoint[], knotsU: number[], width: number): ControlNet {
+  const n = outline.length - 1;
+  const cy = outline.slice(0, n).reduce((s, o) => s + o.y, 0) / n;
+  const cz = outline.slice(0, n).reduce((s, o) => s + o.z, 0) / n;
+  const h = width / 2;
+  const row = (x: number, cap: boolean): WPoint[] =>
+    outline.map(({ y, z, w }) => (cap ? { x, y: cy, z: cz, w } : { x, y, z, w }));
+  return makeNet([row(-h, true), row(-h, false), row(h, false), row(h, true)], 2, 1, knotsU, [0, 0, 1 / 3, 2 / 3, 1, 1]);
+}
+
 function car(): ControlNet {
-  interface Body { w: number; sill: number; belt: number; roofW: number; roof: number }
-  const TRACK = 0.2;  // width of a wheel
-  const R = 0.27;     // wheel radius
-  // the outline of one section; the wheel tracks hang `d` below the sill (d = 0: no wheel here)
-  const section = ({ w, sill, belt, roofW, roof }: Body, d: number) => roundedPolygon([
-    [roofW, roof], [w, belt], [w, sill],
-    [w, sill - d], [w - TRACK, sill - d], [w - TRACK, sill],       // right wheel track
-    [-(w - TRACK), sill], [-(w - TRACK), sill - d], [-w, sill - d], // left wheel track
-    [-w, sill], [-w, belt], [-roofW, roof],
-  ], 0.05);
-
-  const bonnet: Body = { w: 0.68, sill: 0.3, belt: 0.72, roofW: 0.64, roof: 0.73 };
-  const cabin: Body = { w: 0.7, sill: 0.3, belt: 0.76, roofW: 0.54, roof: 1.15 };
-  const boot: Body = { w: 0.68, sill: 0.3, belt: 0.74, roofW: 0.64, roof: 0.75 };
-
-  // the pieces from nose to tail, each adds its middle section and its end section
-  const sections: LoftSection[] = [{ y: -1.3, loop: collapsed(section(bonnet, 0)) }]; // closes the nose
-  const straight = (y: number, body: Body) => {
-    const a = sections[sections.length - 1];
-    const b = section(body, 0);
-    sections.push({ y: (a.y + y) / 2, loop: a.loop.map(([x, z], i) => [(x + b[i][0]) / 2, (z + b[i][1]) / 2]) });
-    sections.push({ y, loop: b });
+  const { radius: R, axle, centres: [front, rear] } = CAR_WHEELS;
+  const outline: SidePoint[] = [{ y: -1.2, z: axle, w: 1 }]; // the nose, at the bottom
+  const line = (y: number, z: number) => {
+    const a = outline[outline.length - 1];
+    outline.push({ y: (a.y + y) / 2, z: (a.z + z) / 2, w: 1 }, { y, z, w: 1 });
   };
-  const wheel = (yc: number, body: Body) => {
-    straight(yc - R, body);                                                      // up to the front of the wheel
-    sections.push({ y: yc - R, loop: section(body, R), w: Math.SQRT1_2 });       // corner of the first quarter
-    sections.push({ y: yc, loop: section(body, R) });                            // lowest point of the wheel
-    sections.push({ y: yc + R, loop: section(body, R), w: Math.SQRT1_2 });       // corner of the second quarter
-    sections.push({ y: yc + R, loop: section(body, 0) });                        // back of the wheel
+  // a quarter circle: the corner of its control triangle has weight √2/2
+  const quarter = (cornerY: number, cornerZ: number, y: number, z: number) => {
+    outline.push({ y: cornerY, z: cornerZ, w: Math.SQRT1_2 }, { y, z, w: 1 });
+  };
+  // half a wheel below the body, from its back (yc + R) to its front (yc - R)
+  const wheel = (yc: number) => {
+    quarter(yc + R, axle - R, yc, axle - R);
+    quarter(yc - R, axle - R, yc - R, axle);
   };
 
-  straight(-1.3, bonnet);  // front face
-  wheel(-0.82, bonnet);    // front wheels
-  straight(-0.4, bonnet);  // end of the bonnet
-  straight(0.0, cabin);    // windscreen
-  straight(0.45, cabin);   // roof
-  wheel(0.85, boot);       // rear window, then the rear wheels
-  straight(1.3, boot);     // boot
-  const tail = sections[sections.length - 1];
-  const last = { y: 1.3, loop: collapsed(tail.loop) };
-  sections.push({ y: 1.3, loop: tail.loop.map((p, i) => [(p[0] + last.loop[i][0]) / 2, (p[1] + last.loop[i][1]) / 2]) });
-  sections.push(last);     // closes the tail
+  line(-1.2, 0.55);   // front face
+  line(-0.45, 0.7);   // hood, sloping up
+  line(-0.2, 1.05);   // windscreen  } the cabin: a trapezoid on top of the body
+  line(0.55, 1.05);   // roof        }
+  line(0.85, 0.75);   // rear window }
+  line(1.2, 0.7);     // trunk, almost level
+  line(1.2, axle);    // rear face
+  line(rear + R, axle);
+  wheel(rear);
+  line(front + R, axle); // the floor between the wheels
+  wheel(front);
+  line(-1.2, axle);   // back to the nose
 
-  const pieces = (sections.length - 1) / 2;
-  return loft(sections, 2, repeatedKnots(pieces, 2, 2));
+  const pieces = (outline.length - 1) / 2;
+  return extrudeSide(outline, repeatedKnots(pieces, 2, 2), 1.2);
 }
 
 export function allShapes(): Shape[] {
@@ -310,6 +291,6 @@ export function allShapes(): Shape[] {
     { id: 'cup', order: 'A cup', construction: 'revolution, degree 2 profile', concept: 'a profile that turns back on itself (wall thickness)', difficulty: 8, net: cup() },
     { id: 'mushroom', order: 'A mushroom', construction: 'revolution, degree 2 profile', concept: 'an overhang: the cap hangs over the stem', difficulty: 9, net: mushroom() },
     { id: 'boat', order: 'A boat', construction: 'loft, closed hull with deck', concept: 'a stem and a transom close the body, a cabin sits on the deck', difficulty: 10, net: boat() },
-    { id: 'car', order: 'A toy car (final challenge)', construction: 'loft, rounded box sections, rational pieces in v', concept: 'everything at once: flat panels, sharp edges, double knots and wheels that are only round through weights', difficulty: 11, net: car() },
+    { id: 'car', order: 'A toy car (final challenge)', construction: 'extrusion, degree 2, rational wheel arcs', concept: 'everything at once: straight panels, corners from double knots and wheels that are only round through weights', difficulty: 11, net: car() },
   ];
 }

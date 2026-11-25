@@ -1,7 +1,7 @@
 // checks for the Targets of src/shapes.ts: is the Layout valid, do closed shapes close, are circles round
 // used by the tests (src/shapes.test.ts) and by scripts/shapes-preview.ts
 import { evaluate } from './nurbs.ts';
-import type { Shape } from './shapes.ts';
+import { CAR_WHEELS, type Shape } from './shapes.ts';
 import type { ControlNet, Point3 } from './controlNet.ts';
 
 export const CHECK_RES = 40;  // samples per direction
@@ -50,18 +50,16 @@ export function roundness(grid: Point3[][]): number {
   return worst;
 }
 
-// car: the lowest point of every section over a wheel lies on a circle (radius 0.27 below the sill at 0.3)
-export function carWheelError(net: ControlNet, res = 400): number {
+// car: every point of the side outline below an axle, within a wheel's radius of its centre,
+// lies on that wheel's circle. The outline is the middle of the extrusion (v = 0.5)
+export function carWheelError(net: ControlNet, res = 2000): number {
+  const { radius, axle, centres } = CAR_WHEELS;
   let worst = 0;
-  for (let j = 0; j <= res; j++) {
-    let low: Point3 | undefined;
-    for (let i = 0; i <= res; i++) {
-      const p = evaluate(net, i / res, j / res).point;
-      if (!low || p[2] < low[2]) low = p;
-    }
-    const [, y, z] = low!;
-    for (const yc of [-0.82, 0.85]) {
-      if (Math.abs(y - yc) < 0.25) worst = Math.max(worst, Math.abs(Math.hypot(y - yc, z - 0.3) - 0.27));
+  for (let i = 0; i <= res; i++) {
+    const [, y, z] = evaluate(net, i / res, 0.5).point;
+    if (z > axle - 1e-9) continue;
+    for (const yc of centres) {
+      if (Math.abs(y - yc) <= radius + 1e-9) worst = Math.max(worst, Math.abs(Math.hypot(y - yc, z - axle) - radius));
     }
   }
   return worst;

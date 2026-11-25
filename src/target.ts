@@ -109,13 +109,41 @@ export function weightsLevel(): Task {
   };
 }
 
-// the Target with its height squashed: same Layout and weights, so it fits ADR 0001
-// a placeholder until each shape gets a designed starting surface (issue #22)
-function squashed(net: ControlNet, factor = 0.25): ControlNet {
+// how a library shape's starting surface differs from its Target: always flattened, and from the Tent on
+// it gets harder step by step, so the learner must fix more than one direction:
+//   difficulty 2-4  (Tent, Star, Ball):          flattened, and stretched wider in x
+//   difficulty 5-8  (Vase, House, Tree, Cup):    ... and narrower in y
+//   difficulty 9-11 (Mushroom, Boat, Car):       ... and leaning backwards (along y, away from the Target)
+// all of these are affine, so the start keeps the Target's Layout and weights (ADR 0001)
+export interface StartChange {
+  squash: number;  // z is multiplied by this (z = 0 stays)
+  stretchX: number; // x around the shape's middle
+  stretchY: number; // y around the shape's middle
+  lean: number;    // y moves by lean · z (z of the Target): the shape tips backwards
+}
+
+export function startChange(difficulty: number): StartChange {
+  return {
+    squash: 0.25,
+    stretchX: difficulty >= 2 ? 1.3 : 1,
+    stretchY: difficulty >= 5 ? 0.75 : 1,
+    lean: difficulty >= 9 ? 0.35 : 0,
+  };
+}
+
+export function changedStart(net: ControlNet, c: StartChange): ControlNet {
   const out = cloneNet(net);
-  for (let k = 0; k < out.countU * out.countV; k++) {
+  const count = out.countU * out.countV;
+  const lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+  for (let k = 0; k < count; k++) {
+    const [x, y] = getPoint(out, k);
+    lo[0] = Math.min(lo[0], x); hi[0] = Math.max(hi[0], x);
+    lo[1] = Math.min(lo[1], y); hi[1] = Math.max(hi[1], y);
+  }
+  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+  for (let k = 0; k < count; k++) {
     const [x, y, z] = getPoint(out, k);
-    setPoint(out, k, [x, y, z * factor]);
+    setPoint(out, k, [cx + c.stretchX * (x - cx), cy + c.stretchY * (y - cy) + c.lean * z, c.squash * z]);
   }
   return out;
 }
@@ -129,7 +157,7 @@ export function shapeTask(shape: Shape): Task {
     title: `Shape ${shape.difficulty} · ${capitalized(shape.id)}`,
     text: `${shape.order}. ${capitalized(shape.concept)}.`,
     target: shape.net,
-    start: shape.start ?? squashed(shape.net),
+    start: shape.start ?? changedStart(shape.net, startChange(shape.difficulty)),
     tools: ALL_TOOLS,
   };
 }

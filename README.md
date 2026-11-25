@@ -13,6 +13,7 @@ controls yet.
 npm install
 npm run dev        # open http://localhost:5173 in Chrome or Edge
 npm run typecheck
+npm test           # vitest: NURBS evaluation and the shape library checks
 ```
 
 This is the same Vite + TypeScript setup as the torus-knot examples. Shaders

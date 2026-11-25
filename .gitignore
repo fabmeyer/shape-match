@@ -6,3 +6,6 @@ dist/
 .vscode/
 # Windows "downloaded from the internet" markers copied into WSL
 *:Zone.Identifier
+
+# written by scripts/shapes-preview.ts, converted to preview.png by hand
+docs/shapes/preview.bmp

@@ -21,7 +21,8 @@ Priorities until 17.12: (1) error pass + evaluation, (2) Levels with the Solved 
 - **Why triangles, not samples**: with point-to-point Chamfer, the same surface sampled twice gives a Noise floor that grows with the sample spacing h. With point-to-triangle it falls to about curvature × h². Area weighting removes the bias where weights or knots bunch samples together.
 - **Solved** additionally needs the largest single distance (Hausdorff) under a looser bound, so a small wrong spot (for example the crease in level 4) can't hide in the average.
 - **Tolerance τ, per Level and automatic**: when a Level loads, the GPU measures the Target against itself on a grid shifted by half a cell. That is the Noise floor. Then τ = max(3 × Noise floor, 0.2 % of the diagonal).
-- **Stars**: 3★ ≤ τ, 2★ ≤ 3τ, 1★ ≤ 10τ. A Level is Solved at 1★, which unlocks the next one. The factors live in a config and get tuned after a playtest.
+- **Stars**: 3★ ≤ τ, 2★ ≤ 3τ, 1★ ≤ 10τ. The factors live in a config and get tuned after a playtest.
+- **Live grading, then Hand-in**: the Match and the Stars update live while the learner edits, so they see at once whether a move helped. When they are happy, they hand the surface in. The Match and Stars of that moment count. A Hand-in with at least 1★ Solves the Level, which unlocks the next one.
 - **When the error pass runs**: only when the net changes, on its own grid (64² by default, adjustable), separate from the 128² render grid. The heatmap is interpolated onto the surface.
 - **Parameter comparison** (control points, weights, knots) is used only for Hints and as a reference in the evaluation. It is off as soon as the learner's Layout differs from the Target's.
 
@@ -90,21 +91,23 @@ Not possible as one surface: a house with a separate roof, a tree with a separat
 
 ## 5. Game
 
-**Setting**: the Workshop, a craftsperson's workshop where Customers order objects. Every Level is an Order, and every Solved Level puts the learner's own surface on the Shelf.
+**Setting**: the Workshop, a craftsperson's workshop where Customers order objects. Every Level is an Order, and every Level Solved by a Hand-in puts the learner's own surface on the Shelf.
 
-**Flow**: Title → Board → Order (the Customer explains the Task) → Workbench (play) → Result (stars fly in, the object goes on the Shelf) → Board.
+**Flow**: Title → Board → Order (the Customer explains the Task) → Workbench (play) → Hand-in → Result → Board.
 
-**Rewards**: 1–3 Stars per Level, and 1★ unlocks the next space on the Board. Using a Hint caps that Level at 2★.
+**Hand-in and Result**: handing in is the reward moment. The Result screen shows the learner's score for this Hand-in (the Match in percent and the Stars) and their Best for the Level (the hi-score, nice to have), with a "New best!" marker when they beat it. With at least 1★ the Level is Solved: the next Level unlocks, the object goes on the Shelf, and the learner can go back to the Board or try again for more Stars. Below 1★ they get an encouraging "Not quite yet" and go back to the Workbench with their surface unchanged.
+
+**Rewards**: 1–3 Stars per Level, and 1★ unlocks the next space on the Board. The Board shows each Level's best Stars. Using a Hint caps that Level at 2★.
 
 **Look**: a cozy illustrated frame in a warm palette (wood, brass, paper), rounded game UI, a title font with character, and Customer portraits with speech bubbles. The 3D view sits on a work table with a soft contact shadow, a background gradient and a rim light. Art: CC0 packs (for example Kenney.nl) plus our own SVG. No 3D workshop scene.
 
-**Game feel**: Stars pop in one by one, confetti when a Level is solved, Match shown as a filling meter that warms from cold to warm colours, smooth transitions between screens, CC0 sound effects that can be muted.
+**Game feel**: on the Result screen the Match counts up and the Stars pop in one by one, confetti when a Hand-in Solves the Level, a "New best!" badge, Match shown as a filling meter that warms from cold to warm colours, smooth transitions between screens, CC0 sound effects that can be muted.
 
-**How it's built**: the screens are 2D HTML/SVG in front of the WebGPU canvas. The Shelf uses canvas screenshots taken when a Level is solved. Progress is kept in `localStorage` (no server). Animation is CSS only.
+**How it's built**: the screens are 2D HTML/SVG in front of the WebGPU canvas. The Shelf uses canvas screenshots taken at a Hand-in that Solves the Level (replaced by a later, better one). Progress (the Best per Level) is kept in `localStorage` (no server). Animation is CSS only.
 
 ## 6. User interface (Workbench)
 
-- **Task panel**: the Order text, the Match meter, Stars, a banner when the Level is Solved.
+- **Task panel**: the Order text, the live Match meter, Stars, and a **Hand in** button. It is always enabled and looks "ready" once handing in would give at least 1★.
 - **Heatmap** switch.
 - **Hint** button: points at the point, weight or knot that is furthest off.
 - **Performance** panel, collapsible: ms per pass (timestamp queries), FPS, sample counts of render and error pass, adapter name.

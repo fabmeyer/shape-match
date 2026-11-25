@@ -14,6 +14,11 @@ export class History {
     if (this.steps.length > MAX_STEPS) this.steps.shift();
   }
 
+  // a new Level or Layout: the old steps don't fit any more
+  clear(): void {
+    this.steps = [];
+  }
+
   // the points before the last change, or undefined if there is nothing to undo
   pop(): Float32Array | undefined {
     return this.steps.pop();

@@ -38,13 +38,21 @@ _Avoid_: Baseline error, sampling error
 The Shape distance a Level accepts as an exact match, set per Level from its Noise floor. Written τ.
 _Avoid_: Threshold, epsilon
 
+**Hand-in**:
+The learner's decision that their surface is finished. The Match and Stars at that moment are the result of the attempt. Grading is live before it, but only a Hand-in counts.
+_Avoid_: Submit, check, finish
+
 **Solved**:
-A Level is solved once the learner has earned at least one Star in it. Solving a Level unlocks the next one.
+A Level is solved once the learner has handed in a surface with at least one Star. Solving a Level unlocks the next one.
 _Avoid_: Done, passed, completed
 
 **Star**:
-The reward for a Level, 1 to 3 per Level, depending on the best Shape distance reached in relation to the Tolerance.
-_Avoid_: Coin, point, score
+The reward for a Level, 0 to 3, depending on the Shape distance in relation to the Tolerance. It is shown live while editing; a Hand-in records it.
+_Avoid_: Coin, point
+
+**Best**:
+The highest Stars and Match the learner has handed in for a Level, shown on the Result screen and the Board as their hi-score.
+_Avoid_: Record, top score
 
 **Hint**:
 A pointer to the control point, weight or knot that differs most from the Target, found by Parameter comparison.

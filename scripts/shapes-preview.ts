@@ -2,11 +2,10 @@
 // run: node scripts/shapes-preview.ts   (Node 22.18+ runs TypeScript directly)
 // writes docs/shapes/obj/<id>.obj and docs/shapes/preview.bmp (convert to PNG with sips on macOS)
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { evaluate } from '../src/nurbs.ts';
 import { allShapes, type Shape } from '../src/shapes.ts';
-import type { ControlNet, Point3 } from '../src/controlNet.ts';
+import { checkShape, sampleGrid, CHECK_RES as RES } from '../src/shapeChecks.ts';
+import type { Point3 } from '../src/controlNet.ts';
 
-const RES = 40; // samples per direction
 const OUT = new URL('../docs/shapes/', import.meta.url);
 
 type V3 = [number, number, number];
@@ -14,80 +13,8 @@ const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const norm = (a: V3): V3 => { const l = Math.hypot(...a); return [a[0] / l, a[1] / l, a[2] / l]; };
-const dist = (a: V3, b: V3) => Math.hypot(...sub(a, b));
 
-function sampleGrid(net: ControlNet, res: number): Point3[][] {
-  const grid: Point3[][] = [];
-  for (let j = 0; j < res; j++) {
-    const row: Point3[] = [];
-    for (let i = 0; i < res; i++) row.push(evaluate(net, i / (res - 1), j / (res - 1)).point);
-    grid.push(row);
-  }
-  return grid; // grid[j][i] = S(u_i, v_j)
-}
-
-// ---------------------------------------------------------
-// Checks
-// ---------------------------------------------------------
-
-const TOL = 1e-5; // the control points are stored as f32
-
-function checkStructure(net: ControlNet): string[] {
-  const errors: string[] = [];
-  const knots: [number[], number, number, string][] = [[net.knotsU, net.countU, net.p, 'U'], [net.knotsV, net.countV, net.q, 'V']];
-  for (const [U, count, deg, name] of knots) {
-    if (deg < 1 || deg > 3) errors.push(`degree ${name} = ${deg} is outside 1..3 (MAX_DEGREE in tessellate.wgsl)`);
-    if (U.length !== count + deg + 1) errors.push(`knots ${name}: ${U.length} values, expected ${count + deg + 1}`);
-    if (U.some((k, i) => i > 0 && k < U[i - 1])) errors.push(`knots ${name} decrease`);
-    if (U.slice(0, deg + 1).some((k) => k !== 0) || U.slice(-deg - 1).some((k) => k !== 1)) errors.push(`knots ${name} are not clamped to [0, 1]`);
-  }
-  if (net.points.length !== net.countU * net.countV * 4) errors.push('wrong number of control points');
-  for (let k = 3; k < net.points.length; k += 4) if (!(net.points[k] > 0)) { errors.push('a weight is not > 0'); break; }
-  return errors;
-}
-
-// the max distance between the samples of two rows/columns
-function maxGap(a: Point3[], b: Point3[]): number {
-  return Math.max(...a.map((p, i) => dist(p, b[i])));
-}
-
-function checkShape(shape: Shape, grid: Point3[][]): string[] {
-  const errors = checkStructure(shape.net);
-  const column = (i: number) => grid.map((row) => row[i]);
-  const closedAround = shape.construction.startsWith('revolution') || shape.construction.startsWith('loft') || shape.construction.startsWith('extrusion');
-  // closed shapes: the seam u = 0 and u = 1 must be the same curve
-  if (closedAround && maxGap(column(0), column(RES - 1)) > TOL) errors.push(`seam is open: ${maxGap(column(0), column(RES - 1)).toExponential(2)}`);
-  // revolutions: every sample at the same v has the same distance from the z axis (an exact circle)
-  if (shape.construction.startsWith('revolution')) {
-    let worst = 0;
-    for (const row of grid) {
-      const radii = row.map(([x, y]) => Math.hypot(x, y));
-      worst = Math.max(worst, Math.max(...radii) - Math.min(...radii));
-    }
-    if (worst > TOL) errors.push(`not round: radius varies by ${worst.toExponential(2)}`);
-  }
-  // car: the lowest point of every section over a wheel lies on a circle (radius 0.27 below the sill at 0.3)
-  if (shape.id === 'car') {
-    let worst = 0;
-    for (let j = 0; j <= 400; j++) {
-      let low: Point3 | undefined;
-      for (let i = 0; i <= 400; i++) {
-        const p = evaluate(shape.net, i / 400, j / 400).point;
-        if (!low || p[2] < low[2]) low = p;
-      }
-      const [, y, z] = low!;
-      for (const yc of [-0.82, 0.85]) {
-        if (Math.abs(y - yc) < 0.25) worst = Math.max(worst, Math.abs(Math.hypot(y - yc, z - 0.3) - 0.27));
-      }
-    }
-    if (worst > TOL) errors.push(`wheels are not round: radius off by ${worst.toExponential(2)}`);
-  }
-  // extrusions: the first and last rows are closed caps (a single point)
-  if (shape.construction.startsWith('extrusion')) {
-    for (const row of [grid[0], grid[RES - 1]]) if (maxGap(row, row.map(() => row[0])) > TOL) errors.push('a cap is not closed');
-  }
-  return errors;
-}
+// the checks live in src/shapeChecks.ts (also run by npm test)
 
 // ---------------------------------------------------------
 // OBJ export (for Quick Look, Blender, ...)

@@ -13,7 +13,7 @@ export class ParamSpaceView {
   v = 0.5;
 
   private canvas: HTMLCanvasElement;
-  private net: ControlNet;
+  net: ControlNet; // replaced when a Level loads or the Layout changes
   private onChange: () => void;
   private dragging = false;
 

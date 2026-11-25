@@ -282,6 +282,14 @@ const partitionU = new PartitionView(document.getElementById('partitionU') as HT
 const partitionV = new PartitionView(document.getElementById('partitionV') as HTMLCanvasElement, 'v',
   net.countV, net.q, net.knotsV, (v) => { paramView.v = v; paramView.draw(); updateMath(); });
 
+// back to the centre of the parameter square
+document.getElementById('resetUV')!.addEventListener('click', () => {
+  paramView.u = 0.5;
+  paramView.v = 0.5;
+  paramView.draw();
+  updateMath(); // marker, active points, partition plots and formulas follow (u, v)
+});
+
 // the selection stays when rotating, but it is only shown (and editable) in select mode
 const NO_SELECTION = new Set<number>();
 function visibleSelection(): Set<number> {

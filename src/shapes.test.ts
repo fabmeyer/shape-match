@@ -41,12 +41,15 @@ describe('leaf', () => {
     }
   });
 
-  it('starts flat, with only the 4 vein points to raise', () => {
+  it('starts flat, with only the 4 vein points to lower', () => {
     const start = leaf.start!;
     let different = 0;
     for (let k = 0; k < countU * countV; k++) {
       expect(start.points[k * 4 + 2]).toBe(0);
-      if (z(k) !== 0) different++;
+      if (z(k) !== 0) {
+        expect(z(k)).toBeLessThan(0); // a groove on the upper side, not a ridge
+        different++;
+      }
     }
     expect(different).toBe(4);
   });

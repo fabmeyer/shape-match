@@ -123,9 +123,11 @@ function collapsed(loop: [number, number][]): [number, number][] {
 
 // 1 · leaf: an open bicubic patch, the same kind of surface as the start plane
 // kept simple for the first library Level: every control point on the edge lies in the plane z = 0,
-// only the middle vein (the 4 inner points of column i = 2) is raised. The starting surface is the
-// same leaf lying flat, so one rectangle selection of the vein and one drag up solves it
-const LEAF_VEIN = 0.35;
+// only the middle vein (the 4 inner points of column i = 2) is lowered, so the upper side of the leaf
+// is a shallow groove along the vein, like a real leaf (and like the earlier leaf, whose edges were
+// higher than its middle). The starting surface is the same leaf lying flat, so one rectangle
+// selection of the vein and one drag down solves it
+const LEAF_VEIN = -0.35;
 
 function leafNet(vein: number): ControlNet {
   const countU = 5, countV = 6;
@@ -298,7 +300,7 @@ function car(): ControlNet {
 
 export function allShapes(): Shape[] {
   return [
-    { id: 'leaf', order: 'A leaf for a brooch', construction: 'open patch', concept: 'local support: raise the middle vein, the edge stays flat', difficulty: 1, net: leaf(), start: leafNet(0) },
+    { id: 'leaf', order: 'A leaf for a brooch', construction: 'open patch', concept: 'local support: lower the middle vein, the edge stays flat', difficulty: 1, net: leaf(), start: leafNet(0) },
     { id: 'tent', order: 'A tent for a toy camp', construction: 'extrusion, degree 1', concept: 'degree 1 = straight edges and sharp corners', difficulty: 2, net: tent() },
     { id: 'star', order: 'A star for the Christmas tree', construction: 'extrusion, degree 1', concept: 'many control points together (superposition)', difficulty: 3, net: star() },
     { id: 'ball', order: 'A perfectly round ball', construction: 'revolution', concept: 'weights: only √2/2 makes the circle exact', difficulty: 4, net: ball() },

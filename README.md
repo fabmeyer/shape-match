@@ -47,7 +47,6 @@ are imported with `?raw`.
 | `src/shapeDistance.ts` | Shape distance on the CPU, the reference (ADR 0002) |
 | `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`) |
 | `src/shapeChecks.ts` | Checks for the shape library (also run by `npm test`) |
-| `src/courseModels.ts` | Loads the course test models from `test-models/` |
 | `src/pointDrag.ts`, `src/arcball.ts` | Picking and dragging control points, the camera |
 | `src/paramSpace.ts`, `src/partition.ts`, `src/mathPanel.ts`, `src/walkers.ts` | The side panel views |
 | `*.test.ts`, `*.gpu.test.ts` | Tests in Node and in headless Chromium with WebGPU |

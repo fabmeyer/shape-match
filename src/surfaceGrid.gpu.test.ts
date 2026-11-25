@@ -4,7 +4,6 @@ import { clampedUniformKnots, type ControlNet } from './controlNet.ts';
 import { evaluate } from './nurbs.ts';
 import { samplePositions } from './samples.ts';
 import { allShapes } from './shapes.ts';
-import { courseModels } from './courseModels.ts';
 import { createTessellatePipeline, SurfaceGrid } from './surfaceGrid.ts';
 import { readBuffer, requestTestDevice } from './gpuTesting.ts';
 
@@ -31,7 +30,6 @@ const nets: [string, ControlNet][] = [
   ['ball (weights)', shapes.find((s) => s.id === 'ball')!.net],
   ['vase (closed)', shapes.find((s) => s.id === 'vase')!.net],
   ['house (creases)', shapes.find((s) => s.id === 'house')!.net],
-  ...courseModels.map((m): [string, ControlNet] => [`course model ${m.name}`, m.net]), // once they are in test-models/
 ];
 
 let device: GPUDevice;

@@ -16,6 +16,10 @@ _Avoid_: User shape, user surface
 The structure of a control net: the number of control points in u and v, the degrees and the knot vectors. The Target and the starting Learner surface of a Level share one Layout. Different Levels can have different Layouts.
 _Avoid_: Net structure, topology
 
+**Reference model**:
+A NURBS surface whose exact geometry is known in closed form, used to check that the CPU and the GPU evaluate surfaces correctly: an open Bézier patch, a sphere, a torus. It is not a Target and never appears in a Level.
+_Avoid_: Test model, course model
+
 ## Grading
 
 **Shape distance**:

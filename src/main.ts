@@ -13,6 +13,8 @@ import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
 import { Grader, type Measurement } from './grader.ts';
 import { TaskPanel } from './taskPanel.ts';
+import { Game } from './game.ts';
+import { browserStorage } from './progress.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
@@ -247,7 +249,7 @@ async function handIn() {
   taskPanel.setChecking(true);
   try {
     const { grade } = await grader.check();
-    taskPanel.showHandIn(grade);
+    game.handIn(task, grade);
   } catch (e) {
     distanceInfo.textContent = `Shape match check failed: ${e}`;
   } finally {
@@ -270,8 +272,9 @@ function showMeasurement({ distance: d, grade, calibration, ms }: Measurement) {
 // ---------------------------------------------------------
 
 const tasks = allTasks();
-const requested = new URLSearchParams(location.search).get('task');
-let task: Task = tasks.find((t) => t.id === requested) ?? tasks[0];
+// developer shortcut: ?task=<id> opens that Task on the Workbench, past the Title and the locks
+const requested = tasks.find((t) => t.id === new URLSearchParams(location.search).get('task'));
+let task: Task = requested ?? tasks[0];
 
 let net: ControlNet = cloneNet(task.start); // the Learner surface
 let learner: SurfaceGpu | undefined;
@@ -543,19 +546,12 @@ function loadTask(next: Task) {
   setLearner(cloneNet(task.start));
 }
 
-// Level menu: a stand-in for the Board, which comes with the game screens
-const taskSelect = document.getElementById('taskSelect') as HTMLSelectElement;
-for (const t of tasks) taskSelect.add(new Option(t.title, t.id));
-taskSelect.value = task.id;
-taskSelect.addEventListener('change', () => {
-  const next = tasks.find((t) => t.id === taskSelect.value)!;
-  loadTask(next);
-  const url = new URL(location.href);
-  url.searchParams.set('task', next.id);
-  history.replaceState(null, '', url); // a reload stays in the same Level
-});
+loadTask(task); // the GPU needs a Task from the first frame on, also behind the Title
 
-loadTask(task);
+// the game screens in front of the Workbench: Title, Board, Order, Result (game.ts)
+const game = new Game(tasks, { loadTask, showBest: (best) => taskPanel.setBest(best) }, browserStorage());
+if (requested) game.play(requested);
+else game.showTitle();
 
 // ---------------------------------------------------------
 // Mouse mode and toggles

@@ -64,13 +64,6 @@ export class TaskPanel {
     this.best.textContent = best ? `Best ${starText(best.stars)} ${best.match.toFixed(1)} %` : 'No hand-in yet';
   }
 
-  // the verdict of a Hand-in, in the panel (the Result screen replaces this)
-  showHandIn(grade: Grade): void {
-    this.best.textContent = grade.passed
-      ? `Passed! ${starText(grade.stars)} ${grade.match.toFixed(1)} %`
-      : `Not passed yet (${grade.match.toFixed(1)} %)`;
-  }
-
   // while the Shape match check runs on the GPU, the button can't be clicked again
   setChecking(on: boolean): void {
     this.checking = on;

@@ -149,6 +149,9 @@
   <canvas id="gpuCanvas"></canvas>
 
   <div id="toolbar">
+    <div class="group">
+      <button id="toBoard" title="Back to the Board with all Levels">Board</button>
+    </div>
     <div id="mode" class="group" role="group" aria-label="Mouse mode">
       <button data-mode="rotate" aria-pressed="true" title="Drag to rotate the view">Rotate</button>
       <button data-mode="select" aria-pressed="false" title="Click or drag a rectangle to select control points, drag an arrow to move them">Select</button>
@@ -199,13 +202,6 @@
   </div>
 
   <aside id="side">
-    <section>
-      <label class="row muted" title="Pick a Level (stand-in for the Board until the game screens exist)">
-        Level
-        <select id="taskSelect"></select>
-      </label>
-    </section>
-
     <section id="taskPanel">
       <h2 id="taskTitle">Task</h2>
       <p id="taskText"></p>
@@ -345,6 +341,34 @@
       </details>
     </section>
   </aside>
+
+  <!-- game screens, in front of the Workbench (game.ts) -->
+  <section id="titleScreen" class="screen" hidden>
+    <h1 class="party-title">Shape<br>Match!</h1>
+    <p class="party-sub">Customers order objects. You bend the surface until it matches.</p>
+    <button id="titlePlay" class="party-button yellow big">Play</button>
+  </section>
+
+  <section id="boardScreen" class="screen" hidden>
+    <h1 class="party-title" style="font-size: clamp(40px, 6vw, 64px)">The Board</h1>
+    <p class="party-sub">Pick a space. Pass a Level to unlock the next one.</p>
+    <ol id="boardPath" class="board-path"></ol>
+  </section>
+
+  <section id="orderScreen" class="screen" hidden>
+    <div class="order-card">
+      <p class="order-kicker">New order</p>
+      <h2 id="orderTitle"></h2>
+      <p id="orderText"></p>
+      <p id="orderBest"></p>
+      <div class="order-buttons">
+        <button id="orderStart" class="party-button green">Start</button>
+        <button id="orderBack" class="party-button purple small">Back to the Board</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="resultScreen" class="screen result-screen" hidden aria-live="polite"></section>
 
   <script type="module" src="./src/main.ts"></script>
 </body>

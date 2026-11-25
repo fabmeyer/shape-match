@@ -9,6 +9,7 @@ import { ParamSpaceView } from './paramSpace.ts';
 import { PartitionView } from './partition.ts';
 import { updateMathPanel } from './mathPanel.ts';
 import { level1, shiftedPoints, TARGET_OFFSET } from './target.ts';
+import { samplePositions } from './samples.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import tessellateCode from './shaders/tessellate.wgsl?raw';
 import surfaceCode from './shaders/surface.wgsl?raw';
@@ -393,9 +394,20 @@ updateMath();
 // Surface
 // ---------------------------------------------------------
 
-// samples per direction: the surface is a RES_U x RES_V grid of points
-const RES_U = 128;
-const RES_V = 128;
+// samples per direction: a uniform grid of RENDER_RES values plus the knots (samples.ts),
+// so creases from multiple knots fall on samples; the surface is a RES_U x RES_V grid of points
+const RENDER_RES = 128;
+const samplesU = samplePositions(net.knotsU, net.p, RENDER_RES);
+const samplesV = samplePositions(net.knotsV, net.q, RENDER_RES);
+const RES_U = samplesU.length;
+const RES_V = samplesV.length;
+const sampleData = new Float32Array([...samplesU, ...samplesV]);
+const sampleBuffer = device.createBuffer({
+  label: 'sample positions',
+  size: sampleData.byteLength,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(sampleBuffer, 0, sampleData);
 
 // params for the compute shader (struct Params in tessellate.wgsl, 8 x u32)
 const paramsData = new Uint32Array([
@@ -598,6 +610,7 @@ const tessellateBindGroup = device.createBindGroup({
     { binding: 2, resource: { buffer: knotBuffer } },
     { binding: 3, resource: { buffer: positionBuffer } },
     { binding: 4, resource: { buffer: normalBuffer } },
+    { binding: 5, resource: { buffer: sampleBuffer } },
   ],
 });
 const surfaceBindGroup = device.createBindGroup({
@@ -617,6 +630,7 @@ const targetTessellateBindGroup = device.createBindGroup({
     { binding: 2, resource: { buffer: knotBuffer } },
     { binding: 3, resource: { buffer: targetPositionBuffer } },
     { binding: 4, resource: { buffer: targetNormalBuffer } },
+    { binding: 5, resource: { buffer: sampleBuffer } },
   ],
 });
 const targetSurfaceBindGroup = device.createBindGroup({

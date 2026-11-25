@@ -1,5 +1,6 @@
 // compute pass: evaluates the NURBS surface S(u, v) and its normal on a resU x resV grid,
 // one thread per (u, v) sample. Both results are used as vertex buffers
+// the parameter values come from samplePositions in samples.ts (a uniform grid plus the knots)
 // The NURBS Book: A2.1 FindSpan, A2.3 DersBasisFuns (first derivatives only), A4.3 / A4.4
 
 const MAX_DEGREE : u32 = 3u;
@@ -21,6 +22,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read> knots : array<f32>;           // U, then V from offV
 @group(0) @binding(3) var<storage, read_write> positions : array<vec4f>;
 @group(0) @binding(4) var<storage, read_write> normals : array<vec4f>;
+@group(0) @binding(5) var<storage, read> samples : array<f32>;         // resU values of u, then resV values of v
 
 fn knot(off : u32, i : u32) -> f32 {
   return knots[off + i];
@@ -126,8 +128,8 @@ fn cs_main(@builtin(global_invocation_id) id : vec3u) {
   // the grid is rounded up to whole workgroups: skip threads outside it
   if (id.x >= params.resU || id.y >= params.resV) { return; }
 
-  let u = f32(id.x) / f32(params.resU - 1u);
-  let v = f32(id.y) / f32(params.resV - 1u);
+  let u = samples[id.x];
+  let v = samples[params.resU + id.y];
   let sample = surfaceSample(u, v);
   let index = id.y * params.resU + id.x;
   positions[index] = vec4f(sample.point, 1.0);

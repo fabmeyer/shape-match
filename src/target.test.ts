@@ -38,8 +38,12 @@ describe('cloneNet', () => {
   });
 });
 
-describe('Level 2 (superposition)', () => {
-  const task = tasks.find((t) => t.id === 'level2')!;
+describe('the final Level (superposition)', () => {
+  const task = tasks.find((t) => t.id === 'superposition')!;
+
+  it('comes last on the Board', () => {
+    expect(tasks.at(-1)).toBe(task);
+  });
   const z = (k: number) => getPoint(task.target, k)[2];
 
   it('has a ridge, a valley, and a flat point where they cross', () => {
@@ -54,8 +58,8 @@ describe('Level 2 (superposition)', () => {
   });
 });
 
-describe('Level 3 (weights)', () => {
-  const task = tasks.find((t) => t.id === 'level3')!;
+describe('Level 2 (weights)', () => {
+  const task = tasks.find((t) => t.id === 'weights')!;
 
   it('starts with the points of the Target and all weights 1', () => {
     for (let k = 0; k < task.start.countU * task.start.countV; k++) {
@@ -72,6 +76,12 @@ describe('Level 3 (weights)', () => {
 
   it('allows changing weights only', () => {
     expect(task.tools).toEqual({ movePoints: false, weights: true, knotInsertion: false });
+  });
+});
+
+describe('titles', () => {
+  it('every Level name starts with a capital letter', () => {
+    for (const task of tasks) expect(task.title.split('·').pop()!.trim()).toMatch(/^[A-Z]/);
   });
 });
 

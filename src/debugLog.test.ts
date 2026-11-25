@@ -48,7 +48,7 @@ describe('buildReport', () => {
     const report = buildReport({
       app: { version: 'test', createdAt: '2026-11-25', url: 'http://localhost' },
       environment: { userAgent: 'vitest' },
-      task: { id: 'leaf', title: 'Shape 1 · leaf' },
+      task: { id: 'leaf', title: 'Shape 1 · Leaf' },
       learner: netToData(leaf),
       state: { view: 'top' },
     }, log);

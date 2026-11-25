@@ -117,7 +117,7 @@ describe('error pass', () => {
 });
 
 // every Level as the app grades it: on the GPU, on the app's error grid (the Noise floor, and so τ,
-// depends on the grid: on coarser grids the start of Level 1 or Level 3 would already get a Star)
+// depends on the grid: on coarser grids the start of Level 1 or Level 2 (weights) would already get a Star)
 describe('every Task', () => {
   let tessellate: GPUComputePipeline;
   beforeAll(() => { tessellate = createTessellatePipeline(device); });

@@ -27,3 +27,30 @@ describe('shape library', () => {
     expect(carWheelError(shapes.find((s) => s.id === 'car')!.net)).toBeLessThan(CHECK_TOL);
   });
 });
+
+describe('leaf', () => {
+  const leaf = shapes.find((s) => s.id === 'leaf')!;
+  const { countU, countV } = leaf.net;
+  const z = (k: number) => leaf.net.points[k * 4 + 2] / leaf.net.points[k * 4 + 3];
+
+  it('has every outer control point in the plane z = 0', () => {
+    for (let j = 0; j < countV; j++) {
+      for (let i = 0; i < countU; i++) {
+        if (i === 0 || j === 0 || i === countU - 1 || j === countV - 1) expect(z(j * countU + i)).toBe(0);
+      }
+    }
+  });
+
+  it('starts flat, with only the 4 vein points to lower', () => {
+    const start = leaf.start!;
+    let different = 0;
+    for (let k = 0; k < countU * countV; k++) {
+      expect(start.points[k * 4 + 2]).toBe(0);
+      if (z(k) !== 0) {
+        expect(z(k)).toBeLessThan(0); // a groove on the upper side, not a ridge
+        different++;
+      }
+    }
+    expect(different).toBe(4);
+  });
+});

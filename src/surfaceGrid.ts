@@ -26,6 +26,8 @@ export class SurfaceGrid {
   readonly controlPoints: GPUBuffer; // (w*x, w*y, w*z, w), index j * countU + i
   readonly positions: GPUBuffer;     // vec4f per sample, index j * resU + i (also a vertex buffer)
   readonly normals: GPUBuffer;       // vec4f per sample
+  // the 4th component of positions is u, of normals v (tessellate.wgsl)
+  readonly samples: GPUBuffer;       // the parameter values of the grid: resU values of u, then resV values of v
 
   // set when the control points changed; the next tessellate() evaluates the surface again
   dirty = true;
@@ -57,14 +59,14 @@ export class SurfaceGrid {
     // both knot vectors in one buffer: U first, V starts at index knotsU.length
     const knots = this.buffers.create('knots', STORAGE, new Float32Array([...net.knotsU, ...net.knotsV]));
     // the parameter values of the grid: resU values of u, then resV values of v
-    const samples = this.buffers.create('sample positions', STORAGE, new Float32Array([...samplesU, ...samplesV]));
+    this.samples = this.buffers.create('sample positions', STORAGE, new Float32Array([...samplesU, ...samplesV]));
     // written by the compute pass, read by the render pass or the distance pass (COPY_SRC: tests read them back)
     this.positions = this.buffers.create('surface positions', STORAGE | VERTEX | COPY_SRC, this.sampleCount * 16);
     this.normals = this.buffers.create('surface normals', STORAGE | VERTEX | COPY_SRC, this.sampleCount * 16);
 
     this.bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
-      entries: [params, this.controlPoints, knots, this.positions, this.normals, samples]
+      entries: [params, this.controlPoints, knots, this.positions, this.normals, this.samples]
         .map((buffer, binding) => ({ binding, resource: { buffer } })),
     });
   }

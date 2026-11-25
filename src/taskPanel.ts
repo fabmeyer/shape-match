@@ -11,6 +11,7 @@ export class TaskPanel {
 
   private title = document.getElementById('taskTitle') as HTMLElement;
   private text = document.getElementById('taskText') as HTMLElement;
+  private tools = document.getElementById('taskTools') as HTMLElement;
   private matchValue = document.getElementById('matchValue') as HTMLElement;
   private matchFill = document.getElementById('matchFill') as HTMLElement;
   private marks = [document.getElementById('mark1') as HTMLElement, document.getElementById('mark2') as HTMLElement];
@@ -27,9 +28,10 @@ export class TaskPanel {
     });
   }
 
-  setTask(title: string, text: string): void {
+  setTask(title: string, text: string, tools: string): void {
     this.title.textContent = title;
     this.text.textContent = text;
+    this.tools.textContent = tools;
     this.setCalibrating();
   }
 

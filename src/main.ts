@@ -1,6 +1,6 @@
 import { quat } from 'wgpu-matrix';
 import { initWebGPU } from './webgpu-init.ts';
-import { ArcballCamera, type ViewName } from './arcball.ts';
+import { ArcballCamera, VIEW_LABELS, type ViewName } from './arcball.ts';
 import { getPoint, getWeight, setWeight, type ControlNet } from './controlNet.ts';
 import { PointDragger } from './pointDrag.ts';
 import { History } from './history.ts';
@@ -8,13 +8,14 @@ import { evaluate } from './nurbs.ts';
 import { ParamSpaceView } from './paramSpace.ts';
 import { PartitionView } from './partition.ts';
 import { updateMathPanel } from './mathPanel.ts';
-import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task } from './target.ts';
+import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, toolsText, type Task } from './target.ts';
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
 import { Grader, type Measurement } from './grader.ts';
 import { TaskPanel } from './taskPanel.ts';
 import { Game } from './game.ts';
-import { browserStorage } from './progress.ts';
+import { browserStorage, loadProgress } from './progress.ts';
+import { buildReport, debugLog, errorMessage, netToData } from './debugLog.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
@@ -24,7 +25,18 @@ import gizmoCode from './shaders/gizmo.wgsl?raw';
 import curvesCode from './shaders/curves.wgsl?raw';
 
 const canvas = document.getElementById('gpuCanvas') as HTMLCanvasElement;
-const { device, context, format } = await initWebGPU(canvas);
+const { device, context, format, adapterName } = await initWebGPU(canvas);
+
+// debugging (debugLog.ts): every error ends up in the log; ?debug also echoes the log to the console
+debugLog.echo = new URLSearchParams(location.search).has('debug');
+debugLog.log('start', { version: __APP_VERSION__, adapter: adapterName });
+window.addEventListener('error', (e) => debugLog.log('error', { message: e.message, at: `${e.filename}:${e.lineno}` }));
+window.addEventListener('unhandledrejection', (e) => debugLog.log('error', { message: errorMessage(e.reason) }));
+device.addEventListener('uncapturederror', (e) => {
+  const message = (e as GPUUncapturedErrorEvent).error.message;
+  debugLog.log('error', { gpu: true, message });
+  console.error(`WebGPU error: ${message}`);
+});
 
 // ---------------------------------------------------------
 // Depth buffer and camera
@@ -72,21 +84,26 @@ const cameraBuffer = device.createBuffer({
 const tessellatePipeline = createTessellatePipeline(device);
 
 const surfaceModule = device.createShaderModule({ label: 'surface', code: surfaceCode });
-const surfacePipeline = device.createRenderPipeline({
-  label: 'surface',
-  layout: 'auto',
-  vertex: {
-    module: surfaceModule,
-    entryPoint: 'vs_main',
-    buffers: [
-      { arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }, // positions
-      { arrayStride: 16, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x4' }] }, // normals
-    ],
-  },
-  fragment: { module: surfaceModule, entryPoint: 'fs_main', targets: [{ format }] },
-  primitive: { topology: 'triangle-list', cullMode: 'none' },
-  depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
-});
+// two pipelines from the same shader: the plain surface, and the Learner surface with the heatmap
+function surfacePipelineWith(fragment: 'fs_main' | 'fs_heat'): GPURenderPipeline {
+  return device.createRenderPipeline({
+    label: fragment === 'fs_heat' ? 'surface with heatmap' : 'surface',
+    layout: 'auto',
+    vertex: {
+      module: surfaceModule,
+      entryPoint: 'vs_main',
+      buffers: [
+        { arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }, // positions (and u)
+        { arrayStride: 16, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x4' }] }, // normals (and v)
+      ],
+    },
+    fragment: { module: surfaceModule, entryPoint: fragment, targets: [{ format }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+  });
+}
+const surfacePipeline = surfacePipelineWith('fs_main');
+const surfaceHeatPipeline = surfacePipelineWith('fs_heat');
 
 const pointsModule = device.createShaderModule({ label: 'points', code: pointsCode });
 const pointsPipeline = device.createRenderPipeline({
@@ -149,6 +166,7 @@ const curvesBehindPipeline = curvesPipeline(true);
 const pipelines: SurfacePipelines = {
   tessellate: tessellatePipeline,
   surface: surfacePipeline,
+  surfaceHeat: surfaceHeatPipeline,
   points: pointsPipeline,
   polygon: polygonPipeline,
   stems: stemsPipeline,
@@ -235,11 +253,62 @@ const grader = new Grader(device, tessellatePipeline);
 const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphElement;
 const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
 errorResSelect.addEventListener('change', () => { grader.resolution = Number(errorResSelect.value); });
-grader.onError = (e) => { distanceInfo.textContent = `Error pass failed: ${e}`; };
+grader.onError = (e) => {
+  distanceInfo.textContent = `Error pass failed: ${errorMessage(e)}`;
+  debugLog.log('error', { in: 'error pass', message: errorMessage(e) });
+};
+let lastMeasurement: Measurement | undefined;
 grader.onMeasured = (m) => {
   if (m.grade && m.starMarks) taskPanel.show(m.grade, m.starMarks);
+  setHeatScale(m.heat);
   showMeasurement(m);
+  // a drag measures many times: the log gets an entry when the Stars change, the report the last one
+  if (m.grade && m.grade.stars !== lastMeasurement?.grade?.stars) {
+    debugLog.log('measure', { stars: m.grade.stars, match: round(m.grade.match), rms: m.distance.rms, hausdorff: m.distance.hausdorff });
+  }
+  lastMeasurement = m;
 };
+const round = (x: number, digits = 3) => Number(x.toFixed(digits));
+
+// ---------------------------------------------------------
+// Heatmap: the Learner surface coloured by its distance to the Target (surface.wgsl, fs_heat)
+// reads the per-sample distances of the error pass straight from the GPU; its scale comes with every grade
+// ---------------------------------------------------------
+
+let showHeatmap = true;
+const heatParams = new ArrayBuffer(16); // struct Heat: resU, resV (u32), cold, hot (f32, world units)
+const heatInts = new Uint32Array(heatParams);
+const heatFloats = new Float32Array(heatParams);
+const heatBuffer = device.createBuffer({ label: 'heat params', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+let heatScaleKnown = false; // only after the Level is calibrated
+let heatGroup: GPUBindGroup | undefined;
+let heatGroupRevision = -1;
+
+function setHeatScale(scale: Measurement['heat']) {
+  heatScaleKnown = scale !== undefined;
+  if (!scale) return;
+  heatFloats[2] = scale.cold;
+  heatFloats[3] = scale.hot;
+  device.queue.writeBuffer(heatBuffer, 0, heatParams);
+}
+
+// the bind group follows the error pass's buffers, which a new Level, Layout or grid replaces
+function currentHeatGroup(): GPUBindGroup | undefined {
+  if (!showHeatmap || !heatScaleKnown) return undefined;
+  if (grader.heatRevision !== heatGroupRevision) {
+    const source = grader.heatSource;
+    if (!source) return undefined;
+    heatInts[0] = source.resU;
+    heatInts[1] = source.resV;
+    device.queue.writeBuffer(heatBuffer, 0, heatParams);
+    heatGroup = device.createBindGroup({
+      layout: surfaceHeatPipeline.getBindGroupLayout(1),
+      entries: [heatBuffer, source.samples, source.distances].map((buffer, binding) => ({ binding, resource: { buffer } })),
+    });
+    heatGroupRevision = grader.heatRevision;
+  }
+  return heatGroup;
+}
 
 const taskPanel = new TaskPanel();
 taskPanel.onHandIn = handIn;
@@ -251,7 +320,8 @@ async function handIn() {
     const { grade } = await grader.check();
     game.handIn(task, grade);
   } catch (e) {
-    distanceInfo.textContent = `Shape match check failed: ${e}`;
+    distanceInfo.textContent = `Shape match check failed: ${errorMessage(e)}`;
+    debugLog.log('error', { in: 'hand-in', message: errorMessage(e) });
   } finally {
     taskPanel.setChecking(false);
   }
@@ -309,7 +379,7 @@ const mathValues = document.getElementById('mathValues') as HTMLElement;
 
 const dragger = new PointDragger(canvas, camera, net, {
   onSelect: selectionChanged,
-  onBeginEdit: beginEdit,
+  onBeginEdit: () => beginEdit('drag', { points: [...dragger.selected] }),
   onEdit: pointsChanged,
 });
 const paramView = new ParamSpaceView(document.getElementById('uvCanvas') as HTMLCanvasElement, net, updateMath);
@@ -336,7 +406,8 @@ function visibleSelection(): Set<number> {
 }
 
 // call before every change of the control points, so it can be undone
-function beginEdit() {
+function beginEdit(kind: string, data?: Record<string, unknown>) {
+  debugLog.log('edit', { kind, ...data });
   undoSteps.push(net.points);
   undoButton.disabled = false;
 }
@@ -398,6 +469,7 @@ function undo() {
   const previous = undoSteps.pop();
   if (!previous) return;
   net.points.set(previous);
+  debugLog.log('edit', { kind: 'undo' });
   undoButton.disabled = undoSteps.size === 0;
   pointsChanged();
 }
@@ -408,17 +480,55 @@ function resetPoints() {
     setLearner(cloneNet(task.start));
     return;
   }
-  beginEdit();
+  beginEdit('reset');
   net.points.set(task.start.points);
   dragger.selected.clear();
   selectionChanged();
   pointsChanged();
 }
 
+// developer: everything someone else needs to see what happens here, as JSON on the clipboard
+// (paste it into an issue or a chat); where the clipboard is blocked, it appears in a text field to copy by hand
+const CLIPBOARD_TIMEOUT_MS = 1500;
+async function copyDebugReport() {
+  const report = buildReport({
+    app: { version: __APP_VERSION__, createdAt: new Date().toISOString(), url: location.href },
+    environment: { userAgent: navigator.userAgent, adapter: adapterName, screen: `${innerWidth}x${innerHeight} @${devicePixelRatio}` },
+    task: { id: task.id, title: task.title },
+    learner: netToData(net),
+    state: {
+      mode,
+      camera: { view: camera.view, flipped: camera.flipped, target: [...camera.target], distance: camera.distance, orientation: [...camera.orientation] },
+      switches: { showPoints, showPolygon, showSolution, showWalkers, showMarker, showHeatmap },
+      errorGrid: grader.resolution,
+      calibration: lastMeasurement?.calibration,
+      lastMeasurement: lastMeasurement && { distance: lastMeasurement.distance, grade: lastMeasurement.grade },
+      undoSteps: undoSteps.size,
+      progress: loadProgress(browserStorage()),
+    },
+  });
+  const json = JSON.stringify(report, null, 2);
+  const status = document.getElementById('reportStatus')!;
+  const fallback = document.getElementById('reportText') as HTMLTextAreaElement;
+  // writeText can wait forever on a permission prompt: after a while the text field takes over
+  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('clipboard timeout')), CLIPBOARD_TIMEOUT_MS));
+  try {
+    await Promise.race([navigator.clipboard.writeText(json), timeout]);
+    fallback.hidden = true;
+    status.textContent = `Copied (${Math.round(json.length / 1024)} KB). Paste it where you need it.`;
+  } catch {
+    fallback.hidden = false;
+    fallback.value = json;
+    fallback.select();
+    status.textContent = 'The browser blocked the clipboard: copy the text below by hand.';
+  }
+}
+document.getElementById('copyReport')!.addEventListener('click', copyDebugReport);
+
 // developer: the learner's surface becomes the Target, to try Hand in and the Result screen
 document.getElementById('snapSolution')!.addEventListener('click', () => {
   if (!sameLayout(net, task.target)) return;
-  beginEdit();
+  beginEdit('snap to solution');
   net.points.set(task.target.points);
   pointsChanged();
 });
@@ -441,6 +551,13 @@ window.addEventListener('keydown', (e) => {
 const WEIGHT_MIN = 0.1; // weights must stay > 0
 const WEIGHT_MAX = 5;
 
+// the slider is exponential (as in Shene's curve tool): it moves log(w), so the range 0.1 ... 1 gets as
+// much room as 1 ... 5 and small weights like √2/2 can be set precisely; the number field stays linear
+weightSlider.min = String(Math.log(WEIGHT_MIN));
+weightSlider.max = String(Math.log(WEIGHT_MAX));
+weightSlider.step = '0.001';
+const sliderValue = (w: number) => String(Math.log(w));
+
 function updateWeightPanel() {
   const selected = [...visibleSelection()];
   weightSlider.disabled = weightNumber.disabled = selected.length === 0 || !task.tools.weights;
@@ -448,7 +565,7 @@ function updateWeightPanel() {
     selectionInfo.textContent = mode === 'select'
       ? 'Click a control point. Shift+click adds one, dragging on empty space selects with a rectangle.'
       : showPoints ? 'Switch to Select to pick control points.' : 'Switch Points on to pick control points.';
-    weightSlider.value = '1';
+    weightSlider.value = sliderValue(1);
     weightNumber.value = '';
     return;
   }
@@ -461,8 +578,8 @@ function updateWeightPanel() {
     const same = weights.every((w) => Math.abs(w - weights[0]) < 1e-6);
     selectionInfo.textContent = `${selected.length} points selected` + (same ? '' : ', with different weights');
   }
-  weightSlider.value = String(weights[0]);
-  if (document.activeElement !== weightNumber) weightNumber.value = weights[0].toFixed(2); // don't overwrite while typing
+  weightSlider.value = sliderValue(weights[0]);
+  if (document.activeElement !== weightNumber) weightNumber.value = weights[0].toFixed(3); // don't overwrite while typing
 }
 
 // one drag of the slider (or one edit of the number) is one undo step
@@ -470,7 +587,7 @@ let weightEditing = false;
 function setWeights(value: number) {
   if (!Number.isFinite(value) || !task.tools.weights) return;
   if (!weightEditing) {
-    beginEdit();
+    beginEdit('weight', { points: [...visibleSelection()], w: value });
     weightEditing = true;
   }
   const w = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, value));
@@ -478,8 +595,9 @@ function setWeights(value: number) {
   pointsChanged();
 }
 
+weightSlider.addEventListener('input', () => setWeights(Math.exp(Number(weightSlider.value))));
+weightNumber.addEventListener('input', () => setWeights(Number(weightNumber.value)));
 for (const input of [weightSlider, weightNumber]) {
-  input.addEventListener('input', () => setWeights(Number(input.value)));
   input.addEventListener('change', () => {
     weightEditing = false;
     updateWeightPanel();
@@ -535,7 +653,10 @@ function setLearner(next: ControlNet) {
 
 function loadTask(next: Task) {
   task = next;
-  taskPanel.setTask(task.title, task.text);
+  lastMeasurement = undefined;
+  heatScaleKnown = false; // the new Level's scale comes with its calibration
+  debugLog.log('level', { id: task.id, title: task.title });
+  taskPanel.setTask(task.title, task.text, toolsText(task.tools));
   dragger.allowMove = task.tools.movePoints;
 
   target?.destroy();
@@ -546,12 +667,15 @@ function loadTask(next: Task) {
   setLearner(cloneNet(task.start));
 }
 
-loadTask(task); // the GPU needs a Task from the first frame on, also behind the Title
-
 // the game screens in front of the Workbench: Title, Board, Order, Result (game.ts)
+// the GPU needs a Task from the first frame on, also behind the Title
 const game = new Game(tasks, { loadTask, showBest: (best) => taskPanel.setBest(best) }, browserStorage());
-if (requested) game.play(requested);
-else game.showTitle();
+if (requested) {
+  game.play(requested);
+} else {
+  loadTask(task);
+  game.showTitle();
+}
 
 // ---------------------------------------------------------
 // Mouse mode and toggles
@@ -573,14 +697,27 @@ function setMode(next: Mode) {
 modeButtons.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode as Mode)));
 
 // views: perspective, or straight along an axis (top = xy-plane, front = xz-plane, side = yz-plane)
+// Flip looks at a straight-on view from the opposite side (Bottom, Back, Other side): when one surface
+// hides the other, flipping shows the one behind
 const viewButtons = document.querySelectorAll<HTMLButtonElement>('#view button');
+const flipButton = document.getElementById('flipView') as HTMLButtonElement;
 function showView(view: ViewName) {
-  viewButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+  viewButtons.forEach((b) => {
+    const name = b.dataset.view as ViewName;
+    b.setAttribute('aria-pressed', String(name === view));
+    if (name !== 'perspective') b.textContent = VIEW_LABELS[name][name === view && camera.flipped ? 1 : 0];
+  });
+  flipButton.disabled = view === 'perspective';
+  flipButton.setAttribute('aria-pressed', String(camera.flipped));
 }
 viewButtons.forEach((b) => b.addEventListener('click', () => {
   camera.setView(b.dataset.view as ViewName);
   showView(camera.view);
 }));
+flipButton.addEventListener('click', () => {
+  camera.flip();
+  showView(camera.view);
+});
 camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
 document.getElementById('resetView')!.addEventListener('click', () => camera.reset(startDistance()));
 setMode('rotate');
@@ -600,6 +737,8 @@ const polygonSwitch = document.getElementById('togglePolygon') as HTMLInputEleme
 polygonSwitch.addEventListener('change', () => { showPolygon = polygonSwitch.checked; });
 const solutionSwitch = document.getElementById('toggleSolution') as HTMLInputElement;
 solutionSwitch.addEventListener('change', () => { showSolution = solutionSwitch.checked; });
+const heatmapSwitch = document.getElementById('toggleHeatmap') as HTMLInputElement;
+heatmapSwitch.addEventListener('change', () => { showHeatmap = heatmapSwitch.checked; });
 const markerSwitch = document.getElementById('toggleMarker') as HTMLInputElement;
 markerSwitch.addEventListener('change', () => {
   showMarker = markerSwitch.checked;
@@ -669,7 +808,7 @@ function frame() {
     },
   });
 
-  learnerGpu.drawSurface(pass);
+  learnerGpu.drawSurface(pass, currentHeatGroup());
   targetGpu.drawSurface(pass);
 
   if (showWalkers) {

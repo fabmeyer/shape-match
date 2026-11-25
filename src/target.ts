@@ -1,11 +1,17 @@
 // Tasks: what a Level asks for. Every Task brings its own Layout (ADR 0001): its Target and its
 // starting Learner surface share that Layout, but different Tasks can have different Layouts
-import { flatControlNet, getPoint, setPoint, type ControlNet } from './controlNet.ts';
-import { allShapes, type Shape } from './shapes.ts';
+import { flatControlNet, getPoint, setPoint, setWeight, type ControlNet } from './controlNet.ts';
+import { allShapes, revolve, type Shape } from './shapes.ts';
 import type { GradingConfig } from './grading.ts';
 
 // the target is drawn this far to the right of the learner's surface (both are about 2 wide)
 export const TARGET_OFFSET = 2.8;
+
+// in words, for the Task panel
+export function toolsText(t: Tools): string {
+  const can = [t.movePoints && 'move control points', t.weights && 'change weights', t.knotInsertion && 'insert knots'].filter(Boolean);
+  return can.length ? `In this Level you can ${can.join(', ')}.` : 'In this Level you can only look.';
+}
 
 // what the learner may change in a Level
 export interface Tools {
@@ -52,6 +58,57 @@ export function level1(): Task {
   };
 }
 
+// the final Level: a ridge across the sheet and a valley along it; where they cross, the two cancel out,
+// so the learner sees that the effects of control points add up (superposition). It comes last, after
+// the library shapes: in playtests it was by far the hardest Level
+const SUPERPOSITION_HEIGHT = 0.5;
+
+export function superpositionLevel(): Task {
+  const target = flatControlNet();
+  const { countU, countV } = target;
+  const lift = (i: number, j: number, dz: number) => {
+    const k = j * countU + i;
+    const [x, y, z] = getPoint(target, k);
+    setPoint(target, k, [x, y, z + dz]);
+  };
+  for (let i = 1; i < countU - 1; i++) lift(i, 2, SUPERPOSITION_HEIGHT);  // the ridge: row j = 2
+  for (let j = 1; j < countV - 1; j++) lift(3, j, -SUPERPOSITION_HEIGHT); // the valley: column i = 3
+  return {
+    id: 'superposition',
+    title: 'Final · Superposition',
+    text: 'A ridge runs across the sheet, a valley runs along it. Where they cross, the sheet stays flat: '
+      + 'up and down add up to nothing. Shape both.',
+    target,
+    start: flatControlNet(),
+    tools: { movePoints: true, weights: false, knotInsertion: false },
+  };
+}
+
+// level 2: a closed cylinder, degree 2 x 1 with 9 x 2 points (the circle of shapes.ts, pushed up).
+// Its points already sit on the square around the circle; it is only round with the weights
+// 1 at the middle of each side and √2/2 at the corners. The learner can change weights only, starting at 1
+// with all weights 1 the pipe is only 1.15 % (5.8 τ) off round, which the default rules would give 1★ for:
+// stricter Stars here, so the start gets 0★ and passing needs a corner weight of about 0.63 ... 0.82
+// (3★: about 0.68 ... 0.75, around √2/2 ≈ 0.707; measured on the 64 error grid)
+const PIPE = { radius: 0.8, height: 1.2 };
+const PIPE_GRADING = { star2Factor: 1.5, star1Factor: 3 };
+
+export function weightsLevel(): Task {
+  const target = revolve([{ r: PIPE.radius, z: 0 }, { r: PIPE.radius, z: PIPE.height }], 1);
+  const start = cloneNet(target);
+  for (let k = 0; k < start.countU * start.countV; k++) setWeight(start, k, 1);
+  return {
+    id: 'weights',
+    title: 'Level 2 · Weights',
+    text: 'A pipe that must be perfectly round. The points are in the right place already: '
+      + 'only the weights are wrong. Select points and change their weight until the pipe is round.',
+    target,
+    start,
+    tools: { movePoints: false, weights: true, knotInsertion: false },
+    grading: PIPE_GRADING,
+  };
+}
+
 // the Target with its height squashed: same Layout and weights, so it fits ADR 0001
 // a placeholder until each shape gets a designed starting surface (issue #22)
 function squashed(net: ControlNet, factor = 0.25): ControlNet {
@@ -63,20 +120,24 @@ function squashed(net: ControlNet, factor = 0.25): ControlNet {
   return out;
 }
 
-// a shape of the library as a Task, for trying out Layouts until the Board exists
+const capitalized = (s: string) => s[0].toUpperCase() + s.slice(1);
+
+// a shape of the library as a Task; its id stays lower case (URL, saved progress), its title is capitalized
 export function shapeTask(shape: Shape): Task {
   return {
     id: shape.id,
-    title: `Shape ${shape.difficulty} · ${shape.id}`,
-    text: `${shape.order}. ${shape.concept[0].toUpperCase()}${shape.concept.slice(1)}.`,
+    title: `Shape ${shape.difficulty} · ${capitalized(shape.id)}`,
+    text: `${shape.order}. ${capitalized(shape.concept)}.`,
     target: shape.net,
-    start: squashed(shape.net),
+    start: shape.start ?? squashed(shape.net),
     tools: ALL_TOOLS,
   };
 }
 
+// the Board's order: two Levels that teach one idea each, the library shapes from easy to hard, and
+// superposition last (the hardest)
 export function allTasks(): Task[] {
-  return [level1(), ...allShapes().map(shapeTask)];
+  return [level1(), weightsLevel(), ...allShapes().map(shapeTask), superpositionLevel()];
 }
 
 // copy of the control points, shifted along x

@@ -13,6 +13,7 @@ export interface Shape {
   concept: string;      // what the learner learns by matching it
   difficulty: number;   // 1 (easiest) ... 11, the suggested place in the sequence
   net: ControlNet;
+  start?: ControlNet;   // the starting Learner surface, if the shape has a designed one (same Layout)
 }
 
 // a control point before it goes into the net: Cartesian position and weight
@@ -52,11 +53,11 @@ const CIRCLE_KNOTS = [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1];
 // ---------------------------------------------------------
 
 // profile point in the (r, z) half-plane, with its own weight
-interface ProfilePoint { r: number; z: number; w?: number }
+export interface ProfilePoint { r: number; z: number; w?: number }
 
 // turns the profile once around the z axis: u goes around (the circle), v along the profile
 // a profile that starts and ends on the axis (r = 0) gives a closed surface
-function revolve(profile: ProfilePoint[], q: number, knotsV = clampedUniformKnots(profile.length, q)): ControlNet {
+export function revolve(profile: ProfilePoint[], q: number, knotsV = clampedUniformKnots(profile.length, q)): ControlNet {
   const rows = profile.map(({ r, z, w = 1 }) => CIRCLE.map(([cx, cy], i) => ({
     x: r * cx, y: r * cy, z, w: w * CIRCLE_W[i],
   })));
@@ -121,25 +122,31 @@ function collapsed(loop: [number, number][]): [number, number][] {
 // ---------------------------------------------------------
 
 // 1 · leaf: an open bicubic patch, the same kind of surface as the start plane
-function leaf(): ControlNet {
+// kept simple for the first library Level: every control point on the edge lies in the plane z = 0,
+// only the middle vein (the 4 inner points of column i = 2) is lowered, so the upper side of the leaf
+// is a shallow groove along the vein, like a real leaf (and like the earlier leaf, whose edges were
+// higher than its middle). The starting surface is the same leaf lying flat, so one rectangle
+// selection of the vein and one drag down solves it
+const LEAF_VEIN = -0.35;
+
+function leafNet(vein: number): ControlNet {
   const countU = 5, countV = 6;
   const width = [0, 0.45, 0.6, 0.5, 0.3, 0]; // half-width along the leaf, 0 = stem and tip
   const rows: WPoint[][] = [];
   for (let j = 0; j < countV; j++) {
-    const t = j / (countV - 1);
-    const y = -1 + 2 * t;
+    const y = -1 + (2 * j) / (countV - 1);
     const row: WPoint[] = [];
     for (let i = 0; i < countU; i++) {
       const x = (i / (countU - 1) - 0.5) * 2 * width[j];
-      // a fold along the middle vein, and the leaf cups up a little at the stem and the tip;
-      // symmetric, so the leaf lies level like the starting surface (no tilt from stem to tip)
-      const cup = 2 * t - 1; // -1 at the stem, 0 in the middle, 1 at the tip
-      row.push({ x, y, z: 0.35 * Math.abs(x) + 0.25 * cup * cup, w: 1 });
+      const inner = i > 0 && i < countU - 1 && j > 0 && j < countV - 1;
+      row.push({ x, y, z: inner && i === 2 ? vein : 0, w: 1 });
     }
     rows.push(row);
   }
   return makeNet(rows, 3, 3, clampedUniformKnots(countU, 3), clampedUniformKnots(countV, 3));
 }
+
+const leaf = () => leafNet(LEAF_VEIN);
 
 // 2 · tent: a triangle pushed along y; degree 1 gives straight edges and sharp corners
 function tent(): ControlNet {
@@ -293,7 +300,7 @@ function car(): ControlNet {
 
 export function allShapes(): Shape[] {
   return [
-    { id: 'leaf', order: 'A leaf for a brooch', construction: 'open patch', concept: 'local support: move single control points', difficulty: 1, net: leaf() },
+    { id: 'leaf', order: 'A leaf for a brooch', construction: 'open patch', concept: 'local support: lower the middle vein, the edge stays flat', difficulty: 1, net: leaf(), start: leafNet(0) },
     { id: 'tent', order: 'A tent for a toy camp', construction: 'extrusion, degree 1', concept: 'degree 1 = straight edges and sharp corners', difficulty: 2, net: tent() },
     { id: 'star', order: 'A star for the Christmas tree', construction: 'extrusion, degree 1', concept: 'many control points together (superposition)', difficulty: 3, net: star() },
     { id: 'ball', order: 'A perfectly round ball', construction: 'revolution', concept: 'weights: only √2/2 makes the circle exact', difficulty: 4, net: ball() },

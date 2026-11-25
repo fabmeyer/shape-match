@@ -19,6 +19,19 @@ npm test           # vitest in Node: NURBS, sample positions, shapes, Tasks, Sha
 npm run test:gpu   # vitest in headless Chromium with WebGPU: GPU passes against the CPU reference
 ```
 
+### Debug report
+
+Something looks wrong, or you shaped a surface someone else should use? Open the **Developer**
+section at the bottom of the side panel and click **Copy debug report**. It copies one JSON block
+to paste into an issue or a chat:
+- the app version (git commit), the browser and the GPU
+- the Level and your surface as exact data (the same form a Target is written in)
+- camera, switches, calibration, last grade and progress
+- the last 200 events: Level loads, edits, measurements, Hand-ins, screens and every error
+
+Nothing is sent anywhere: the report only leaves the browser when you paste it. Add `?debug` to the
+URL to also see every event in the browser console.
+
 ### GPU tests
 
 `npm run test:gpu` runs every `*.gpu.test.ts` in headless Chromium through Playwright
@@ -45,12 +58,13 @@ are imported with `?raw`.
 | `src/surfaceGrid.ts` | One surface evaluated on the GPU on a grid (`shaders/tessellate.wgsl`) |
 | `src/surfaceGpu.ts` | A drawn surface: render grid, control points, polygon, stems |
 | `src/shapeDistance.ts` | Shape distance on the CPU, the reference (ADR 0002) |
-| `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`) |
+| `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, `shaders/reduce.wgsl`); its per-sample distances feed the heatmap (`fs_heat` in `shaders/surface.wgsl`) |
 | `src/grading.ts` | Grading rules: Tolerance, Stars, Passed, Match (pure, one config) |
 | `src/grader.ts` | Live grading on the Workbench and the Shape match check of a Hand-in |
 | `src/taskPanel.ts` | Task panel: Match meter, live Stars, Hand in button |
 | `src/progress.ts` | Best per Level, unlocking, Hint cap, saved in `localStorage` |
 | `src/game.ts`, `src/resultScreen.ts`, `src/game.css` | Game screens: Title, Board, Order, Result after a Hand-in |
+| `src/debugLog.ts` | Event log and debug report |
 | `src/shapeChecks.ts` | Checks for the shape library (also run by `npm test`) |
 | `src/pointDrag.ts`, `src/arcball.ts` | Picking and dragging control points, the camera |
 | `src/paramSpace.ts`, `src/partition.ts`, `src/mathPanel.ts`, `src/walkers.ts` | The side panel views |

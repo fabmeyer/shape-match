@@ -6,6 +6,7 @@ export interface WebGPUContext {
   context: GPUCanvasContext;
   canvas: HTMLCanvasElement;
   format: GPUTextureFormat;
+  adapterName: string; // for the debug report and the Performance panel
 }
 
 export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUContext> {
@@ -22,6 +23,8 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUConte
   device.lost.then((info) => {
     console.error(`WebGPU device was lost: ${info.message}`);
   });
+  const info = adapter.info;
+  const adapterName = [info?.vendor, info?.architecture, info?.description].filter(Boolean).join(' ') || 'unknown adapter';
 
   const context = canvas.getContext('webgpu');
   if (!context) {
@@ -40,5 +43,5 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUConte
   configure();
   new ResizeObserver(configure).observe(canvas);
 
-  return { device, context, canvas, format };
+  return { device, context, canvas, format, adapterName };
 }

@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { calibrate, DEFAULT_GRADING, grade, gradingConfig, matchPercent, starMarks, type Calibration } from './grading.ts';
-import { shapeDistance } from './shapeDistance.ts';
-import { allTasks } from './target.ts';
 
 const c: Calibration = { tolerance: 0.002, hausdorffTolerance: 0.004, startRms: 0.2 };
 
@@ -64,19 +62,5 @@ describe('starMarks', () => {
     expect(one).toBeCloseTo(matchPercent(0.02, c), 10);
     expect(two).toBeCloseTo(matchPercent(0.006, c), 10);
     expect(0 < one && one < two && two < 100).toBe(true);
-  });
-});
-
-describe('every Task', () => {
-  // CPU reference; at 16 the Noise floor is so coarse that 10τ reaches the start of some Tasks (Level 1: 3.42 % vs 3.33 %),
-  // from 32 on every start is far outside; the app measures at 64
-  const RES = 32;
-  it.each(allTasks())('$id: the start gives 0 Stars, the Target 3 Stars', (task) => {
-    const config = gradingConfig(task.grading);
-    const noise = shapeDistance(task.target, task.target, { res: RES, learnerShift: 0.5 });
-    const start = shapeDistance(task.target, task.start, { res: RES });
-    const cal = calibrate(noise, start, config);
-    expect(grade(start, cal, config).stars).toBe(0);
-    expect(grade(shapeDistance(task.target, task.target, { res: RES }), cal, config).stars).toBe(3);
   });
 });

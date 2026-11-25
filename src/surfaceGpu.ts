@@ -13,6 +13,7 @@ export const RENDER_RES = 128;
 export interface SurfacePipelines {
   tessellate: GPUComputePipeline;
   surface: GPURenderPipeline;
+  surfaceHeat: GPURenderPipeline; // the same surface with the heatmap (fs_heat in surface.wgsl)
   points: GPURenderPipeline;
   polygon: GPURenderPipeline;
   stems: GPURenderPipeline;
@@ -30,6 +31,7 @@ export class SurfaceGpu {
   private indexCount: number;
   private segmentCount: number;
   private surfaceGroup: GPUBindGroup;
+  private surfaceHeatGroup: GPUBindGroup; // 'auto' layouts belong to one pipeline: its own group 0
   private pointsGroup: GPUBindGroup;
   private polygonGroup: GPUBindGroup;
   private stemsGroup: GPUBindGroup;
@@ -77,6 +79,7 @@ export class SurfaceGpu {
       entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })),
     });
     this.surfaceGroup = group(pipelines.surface, [camera, color]);
+    this.surfaceHeatGroup = group(pipelines.surfaceHeat, [camera, color]);
     this.pointsGroup = group(pipelines.points, [camera, controlPoints, this.flags]);
     this.polygonGroup = group(pipelines.polygon, [camera, controlPoints, segmentBuffer]);
     this.stemsGroup = group(pipelines.stems, [camera, controlPoints]);
@@ -99,9 +102,16 @@ export class SurfaceGpu {
     this.grid.tessellate(compute);
   }
 
-  drawSurface(pass: GPURenderPassEncoder): void {
-    pass.setPipeline(this.pipelines.surface);
-    pass.setBindGroup(0, this.surfaceGroup);
+  // heat: the heatmap's group 1 (scale, samples, distances), or nothing for the plain surface
+  drawSurface(pass: GPURenderPassEncoder, heat?: GPUBindGroup): void {
+    if (heat) {
+      pass.setPipeline(this.pipelines.surfaceHeat);
+      pass.setBindGroup(0, this.surfaceHeatGroup);
+      pass.setBindGroup(1, heat);
+    } else {
+      pass.setPipeline(this.pipelines.surface);
+      pass.setBindGroup(0, this.surfaceGroup);
+    }
     pass.setVertexBuffer(0, this.grid.positions);
     pass.setVertexBuffer(1, this.grid.normals);
     pass.setIndexBuffer(this.indices, 'uint32');

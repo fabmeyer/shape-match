@@ -10,8 +10,8 @@ import { PartitionView } from './partition.ts';
 import { updateMathPanel } from './mathPanel.ts';
 import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task } from './target.ts';
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
+import { createTessellatePipeline } from './surfaceGrid.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
-import tessellateCode from './shaders/tessellate.wgsl?raw';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
 import stemsCode from './shaders/stems.wgsl?raw';
@@ -65,14 +65,7 @@ const cameraBuffer = device.createBuffer({
 // Pipelines (shared by both surfaces, independent of the Layout)
 // ---------------------------------------------------------
 
-const tessellatePipeline = device.createComputePipeline({
-  label: 'tessellate',
-  layout: 'auto',
-  compute: {
-    module: device.createShaderModule({ label: 'tessellate', code: tessellateCode }),
-    entryPoint: 'cs_main',
-  },
-});
+const tessellatePipeline = createTessellatePipeline(device);
 
 const surfaceModule = device.createShaderModule({ label: 'surface', code: surfaceCode });
 const surfacePipeline = device.createRenderPipeline({

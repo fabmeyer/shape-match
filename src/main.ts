@@ -288,7 +288,7 @@ let walkerPointsBindGroup: GPUBindGroup | undefined;
 // Editing: selection, moving, weights, undo
 // ---------------------------------------------------------
 
-type Mode = 'rotate' | 'select';
+type Mode = 'rotate' | 'move' | 'select';
 let mode: Mode = 'rotate';
 let showPoints = true;    // the learner's control points and their stems
 let showPolygon = true;
@@ -562,7 +562,8 @@ const modeButtons = document.querySelectorAll<HTMLButtonElement>('#mode button')
 function setMode(next: Mode) {
   if (next === 'select' && !showPoints) return; // hidden points can't be picked
   mode = next;
-  camera.enabled = mode === 'rotate';
+  camera.enabled = mode !== 'select';
+  camera.drag = mode === 'move' ? 'move' : 'rotate';
   dragger.enabled = mode === 'select';
   canvas.dataset.mode = mode;
   selectionChanged(); // no highlight while rotating

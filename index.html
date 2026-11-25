@@ -12,6 +12,7 @@
     #gpuCanvas { flex: 1; min-width: 0; height: 100%; display: block; touch-action: none; }
     #gpuCanvas[data-mode="rotate"] { cursor: grab; }
     #gpuCanvas[data-mode="rotate"]:active { cursor: grabbing; }
+    #gpuCanvas[data-mode="move"] { cursor: move; }
     #gpuCanvas[data-mode="select"] { cursor: crosshair; }
 
     /* right: stays inside the 3D view (side panel 330 px + margin); wraps to a second row when narrow */
@@ -154,6 +155,7 @@
     </div>
     <div id="mode" class="group" role="group" aria-label="Mouse mode">
       <button data-mode="rotate" aria-pressed="true" title="Drag to rotate the view">Rotate</button>
+      <button data-mode="move" aria-pressed="false" title="Drag to move the view sideways and up or down (also in Top, Front and Side)">Move</button>
       <button data-mode="select" aria-pressed="false" title="Click or drag a rectangle to select control points, drag an arrow to move them">Select</button>
     </div>
     <div id="view" class="group" role="group" aria-label="View">

@@ -17,11 +17,14 @@ export class ArcballCamera {
   orientation: Quat;
   fovY = Math.PI / 4;
   enabled = true;
+  // what dragging does: turn the view around the target, or move it (target and eye together) in the view plane
+  drag: 'rotate' | 'move' = 'rotate';
   view: ViewName = 'perspective';
   onViewChange: (view: ViewName) => void = () => {}; // e.g. rotating leaves a straight-on view
 
   private dragging = false;
   private last: Vec3 = vec3.create();
+  private lastPixel = { x: 0, y: 0 };
   private perspectiveOrientation: Quat = quat.identity(); // to come back to the last free view
   private home: { target: Vec3; orientation: Quat }; // the starting view, for reset()
 
@@ -36,9 +39,15 @@ export class ArcballCamera {
       canvas.setPointerCapture(e.pointerId);
       this.dragging = true;
       this.last = this.toBall(canvas, e);
+      this.lastPixel = { x: e.clientX, y: e.clientY };
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!this.dragging) return;
+      if (this.drag === 'move') {
+        this.move(canvas, e.clientX - this.lastPixel.x, e.clientY - this.lastPixel.y);
+        this.lastPixel = { x: e.clientX, y: e.clientY };
+        return; // moving keeps a straight-on view straight
+      }
       // rotating a straight-on view turns it into a free (perspective) view, starting from where it is
       if (this.view !== 'perspective') {
         this.view = 'perspective';
@@ -73,6 +82,16 @@ export class ArcballCamera {
     const angle = Math.acos(Math.min(1, Math.max(-1, vec3.dot(a, b))));
     const delta = quat.fromAxisAngle(vec3.normalize(axis), -angle);
     this.orientation = quat.normalize(quat.multiply(this.orientation, delta));
+  }
+
+  // moves the view by a mouse movement in CSS pixels: the surfaces follow the mouse
+  // one pixel is the same distance at the target in the perspective and the straight-on views
+  private move(canvas: HTMLCanvasElement, dx: number, dy: number) {
+    const height = canvas.getBoundingClientRect().height || 1;
+    const perPixel = (2 * this.distance * Math.tan(this.fovY / 2)) / height;
+    const right = vec3.transformQuat([1, 0, 0], this.orientation);
+    const up = vec3.transformQuat([0, 1, 0], this.orientation);
+    this.target = vec3.add(this.target, vec3.add(vec3.scale(right, -dx * perPixel), vec3.scale(up, dy * perPixel)));
   }
 
   setView(view: ViewName): void {

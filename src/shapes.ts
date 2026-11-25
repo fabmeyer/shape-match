@@ -131,8 +131,10 @@ function leaf(): ControlNet {
     const row: WPoint[] = [];
     for (let i = 0; i < countU; i++) {
       const x = (i / (countU - 1) - 0.5) * 2 * width[j];
-      // a fold along the middle vein, and the leaf curls up towards the tip
-      row.push({ x, y, z: 0.35 * Math.abs(x) + 0.5 * t * t, w: 1 });
+      // a fold along the middle vein, and the leaf cups up a little at the stem and the tip;
+      // symmetric, so the leaf lies level like the starting surface (no tilt from stem to tip)
+      const cup = 2 * t - 1; // -1 at the stem, 0 in the middle, 1 at the tip
+      row.push({ x, y, z: 0.35 * Math.abs(x) + 0.25 * cup * cup, w: 1 });
     }
     rows.push(row);
   }

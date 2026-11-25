@@ -10,8 +10,9 @@ import { PartitionView } from './partition.ts';
 import { updateMathPanel } from './mathPanel.ts';
 import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, type Task } from './target.ts';
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
+import { createTessellatePipeline } from './surfaceGrid.ts';
+import { ErrorPass, type GpuShapeDistance } from './errorPass.ts';
 import { buildWalkers, MAX_SEGMENTS, SEGMENT_FLOATS } from './walkers.ts';
-import tessellateCode from './shaders/tessellate.wgsl?raw';
 import surfaceCode from './shaders/surface.wgsl?raw';
 import pointsCode from './shaders/points.wgsl?raw';
 import stemsCode from './shaders/stems.wgsl?raw';
@@ -65,14 +66,7 @@ const cameraBuffer = device.createBuffer({
 // Pipelines (shared by both surfaces, independent of the Layout)
 // ---------------------------------------------------------
 
-const tessellatePipeline = device.createComputePipeline({
-  label: 'tessellate',
-  layout: 'auto',
-  compute: {
-    module: device.createShaderModule({ label: 'tessellate', code: tessellateCode }),
-    entryPoint: 'cs_main',
-  },
-});
+const tessellatePipeline = createTessellatePipeline(device);
 
 const surfaceModule = device.createShaderModule({ label: 'surface', code: surfaceCode });
 const surfacePipeline = device.createRenderPipeline({
@@ -231,6 +225,37 @@ const gizmoBindGroup = device.createBindGroup({
 });
 
 // ---------------------------------------------------------
+// Shape distance: the error pass runs on its own grid, only after the net changed
+// ---------------------------------------------------------
+
+const errorPass = new ErrorPass(device, tessellatePipeline);
+let distanceDirty = true; // the net changed since the last measurement
+let measuring = false;    // a measurement is on its way back from the GPU
+const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphElement;
+const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
+errorResSelect.addEventListener('change', () => {
+  errorPass.resolution = Number(errorResSelect.value);
+  distanceDirty = true;
+});
+
+// at most one measurement at a time; changes made meanwhile are measured right after it
+function measureShapeDistance() {
+  measuring = true;
+  distanceDirty = false;
+  const start = performance.now();
+  errorPass.measure()
+    .then((d) => showShapeDistance(d, performance.now() - start))
+    .catch((e) => { distanceInfo.textContent = `Error pass failed: ${e}`; })
+    .finally(() => { measuring = false; });
+}
+
+function showShapeDistance(d: GpuShapeDistance, ms: number) {
+  const percent = (x: number, digits: number) => `${(100 * x).toFixed(digits)} %`;
+  distanceInfo.textContent = `RMS ${percent(d.rms, 3)}, Hausdorff ${percent(d.hausdorff, 2)} of the diagonal `
+    + `(error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
+}
+
+// ---------------------------------------------------------
 // The Task and the two surfaces (rebuilt by loadTask and setLearner)
 // ---------------------------------------------------------
 
@@ -252,6 +277,7 @@ let walkerPointsBindGroup: GPUBindGroup | undefined;
 
 type Mode = 'rotate' | 'select';
 let mode: Mode = 'rotate';
+let showPoints = true;    // the learner's control points and their stems
 let showPolygon = true;
 let showMath = false;  // formula section expanded
 let showSolution = false; // control points of the target
@@ -305,6 +331,8 @@ function beginEdit() {
 // call after every change of the control points
 function pointsChanged() {
   learner!.uploadPoints(net.points);
+  errorPass.uploadLearnerPoints(net.points);
+  distanceDirty = true;
   updateMath();
   updateWeightPanel();
 }
@@ -399,7 +427,7 @@ function updateWeightPanel() {
   if (selected.length === 0) {
     selectionInfo.textContent = mode === 'select'
       ? 'Click a control point. Shift+click adds one, dragging on empty space selects with a rectangle.'
-      : 'Switch to Select to pick control points.';
+      : showPoints ? 'Switch to Select to pick control points.' : 'Switch Points on to pick control points.';
     weightSlider.value = '1';
     weightNumber.value = '';
     return;
@@ -449,6 +477,8 @@ function setLearner(next: ControlNet) {
   learner?.destroy();
   learner = new SurfaceGpu(device, pipelines, cameraBuffer, learnerColorBuffer, net);
   flagData = new Uint32Array(learner.pointCount);
+  errorPass.setLearner(net);
+  distanceDirty = true;
 
   walkerPointBuffer?.destroy();
   walkerFlagBuffer?.destroy();
@@ -493,6 +523,7 @@ function loadTask(next: Task) {
   target?.destroy();
   target = new SurfaceGpu(device, pipelines, cameraBuffer, targetColorBuffer, task.target,
     shiftedPoints(task.target, TARGET_OFFSET));
+  errorPass.setTarget(task.target); // unshifted: the distance compares the surfaces where they are defined
   // the target's control points (solution switch) are never selected: all flags stay 0
   setLearner(cloneNet(task.start));
 }
@@ -518,6 +549,7 @@ loadTask(task);
 const modeButtons = document.querySelectorAll<HTMLButtonElement>('#mode button');
 
 function setMode(next: Mode) {
+  if (next === 'select' && !showPoints) return; // hidden points can't be picked
   mode = next;
   camera.enabled = mode === 'rotate';
   dragger.enabled = mode === 'select';
@@ -539,6 +571,16 @@ viewButtons.forEach((b) => b.addEventListener('click', () => {
 }));
 camera.onViewChange = showView; // rotating a straight-on view makes it a perspective view again
 setMode('rotate');
+
+// hiding the points also leaves Select mode: points you can't see can't be picked
+const pointsSwitch = document.getElementById('togglePoints') as HTMLInputElement;
+const selectButton = document.querySelector<HTMLButtonElement>('#mode button[data-mode="select"]')!;
+pointsSwitch.addEventListener('change', () => {
+  showPoints = pointsSwitch.checked;
+  selectButton.disabled = !showPoints;
+  if (!showPoints) setMode('rotate');
+  updateWeightPanel();
+});
 
 // the control polygon has an on/off switch (a checkbox) instead of a button
 const polygonSwitch = document.getElementById('togglePolygon') as HTMLInputElement;
@@ -626,7 +668,7 @@ function frame() {
     pass.draw(6, walkerSegmentCount);
   }
 
-  learnerGpu.drawStems(pass);
+  if (showPoints) learnerGpu.drawStems(pass);
   if (showPolygon) learnerGpu.drawPolygon(pass);
 
   if (showSolution) {
@@ -634,8 +676,10 @@ function frame() {
     targetGpu.drawPoints(pass);
   }
 
-  learnerGpu.drawPoints(pass); // leaves the points pipeline set for the walkers and the marker
+  if (showPoints) learnerGpu.drawPoints(pass);
 
+  // the walkers and the marker are drawn like control points
+  pass.setPipeline(pointsPipeline);
   if (showWalkers) {
     pass.setBindGroup(0, walkerPointsBindGroup!);
     pass.draw(6, net.countV);
@@ -654,6 +698,8 @@ function frame() {
 
   pass.end();
   device.queue.submit([encoder.finish()]);
+
+  if (distanceDirty && !measuring) measureShapeDistance();
 
   requestAnimationFrame(frame);
 }

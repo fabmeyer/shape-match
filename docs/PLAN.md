@@ -22,7 +22,7 @@ Priorities until 17.12: (1) error pass + evaluation, (2) Levels with the Solved 
 - **Solved** additionally needs the largest single distance (Hausdorff) under a looser bound, so a small wrong spot (for example the crease in level 4) can't hide in the average.
 - **Tolerance τ, per Level and automatic**: when a Level loads, the GPU measures the Target against itself on a grid shifted by half a cell. That is the Noise floor. Then τ = max(3 × Noise floor, 0.2 % of the diagonal).
 - **Stars**: 3★ ≤ τ, 2★ ≤ 3τ, 1★ ≤ 10τ. The factors live in a config and get tuned after a playtest.
-- **Live grading, then Hand-in**: the Match and the Stars update live while the learner edits, so they see at once whether a move helped. When they are happy, they hand the surface in. The Match and Stars of that moment count. A Hand-in with at least 1★ Solves the Level, which unlocks the next one.
+- **Live grading, then Hand-in**: the Match and the Stars update live while the learner edits, so they see at once whether a move helped. When they are happy, they hand the surface in. The Hand-in runs the Shape match check: the error pass computes the Shape distance of the handed-in surface once more and gives Match, Stars and a verdict, Passed (at least 1★) or Not passed. A passing Hand-in Solves the Level, which unlocks the next one.
 - **When the error pass runs**: only when the net changes, on its own grid (64² by default, adjustable), separate from the 128² render grid. The heatmap is interpolated onto the surface.
 - **Parameter comparison** (control points, weights, knots) is used only for Hints and as a reference in the evaluation. It is off as soon as the learner's Layout differs from the Target's.
 
@@ -30,8 +30,8 @@ Priorities until 17.12: (1) error pass + evaluation, (2) Levels with the Solved 
 
 ### 3.1 Correctness
 - The worked example from the lecture: cubic, 7 points, U = [0,0,0,0, .25, .5, .75, 1,1,1,1], u = 0.42 → span 4, basis [0.0082, 0.3588, 0.5807, 0.0524]. `nurbs.ts` already matches it (checked 25.11).
-- The course test models **open patch, vase, torus** with their S(u, v) reference values. *Open: we still need the files.*
-- Each value is checked twice: on the CPU (`nurbs.ts`, vitest) and on the GPU (`tessellate.wgsl` with a readback), with a fixed f32 tolerance. The vase and the torus also test closed surfaces.
+- There are no course test models. Instead, **Reference models** with exact geometry (#7): an **open patch** (bicubic Bézier, against the Bernstein form), a **sphere** (every point at distance r from the centre) and a **torus** (every point fulfils (√(x² + y²) − R)² + z² = r²). Every sample can be checked, not just a few (u, v).
+- Each check runs twice: on the CPU (`nurbs.ts`, vitest) and on the GPU (`tessellate.wgsl` with a readback), with a fixed f32 tolerance. The sphere and the torus also test rational and closed surfaces.
 
 ### 3.2 Performance
 - Request `timestamp-query` as an optional feature. Without it, the UI shows "not available".
@@ -57,7 +57,7 @@ Each Level has its own Layout, shared by its Target and its starting Learner sur
 | 2 | Superposition | 6×6 bicubic, clamped | control points | a ridge and a valley |
 | 3 | Weights | closed cylinder, degree 2×1, 9×2 points | **weights only**, starting at 1 | a pipe or barrel that is only round with the right weights |
 | 4 | Knot multiplicity | bicubic | knot **insertion** (Parameter comparison off) | a folded crease |
-| 5 | Combination | the course's vase test model | everything | a vase |
+| 5 | Combination | the vase from the shape library | everything | a vase |
 
 ### 4.1 Shape library
 
@@ -81,7 +81,7 @@ Each Level has its own Layout, shared by its Target and its starting Learner sur
 
 **Starting surface for the final challenge**: the same car with wheel depth 0. That is the same Layout, so it fits ADR 0001. The learner has to pull down the wheel sections and find the √2/2 weights. That is about 4 × 5 sections to work with, not all 950 points.
 
-The script checks every Layout (knot count, clamped, degree ≤ 3, weights > 0). For the closed shapes it checks that the seam closes, that the caps of the extrusions close, and that every revolution is round to 1e-5. That last check also tests `nurbs.ts` while the course reference values are missing.
+The script checks every Layout (knot count, clamped, degree ≤ 3, weights > 0). For the closed shapes it checks that the seam closes, that the caps of the extrusions close, and that every revolution is round to 1e-5. That last check also tests `nurbs.ts`, alongside the Reference models.
 
 Not possible as one surface: a house with a separate roof, a tree with a separate trunk, a car with wheels. Those would need several patches, which are out of scope.
 
@@ -95,7 +95,7 @@ Not possible as one surface: a house with a separate roof, a tree with a separat
 
 **Flow**: Title → Board → Order (the Customer explains the Task) → Workbench (play) → Hand-in → Result → Board.
 
-**Hand-in and Result**: handing in is the reward moment. The Result screen shows the learner's score for this Hand-in (the Match in percent and the Stars) and their Best for the Level (the hi-score, nice to have), with a "New best!" marker when they beat it. With at least 1★ the Level is Solved: the next Level unlocks, the object goes on the Shelf, and the learner can go back to the Board or try again for more Stars. Below 1★ they get an encouraging "Not quite yet" and go back to the Workbench with their surface unchanged.
+**Hand-in and Result**: handing in is the reward moment. The Result screen shows the learner's score for this Hand-in (the Match in percent and the Stars) and their Best for the Level (the hi-score, nice to have), with a "New best!" marker when they beat it. When it Passed, the Level is Solved: the next Level unlocks, the object goes on the Shelf, and after a short countdown the game routes to the next Level automatically ("Next Level" skips the wait, "Stay and try for more Stars" cancels it). When it Not passed, they get an encouraging "Not passed yet" and go back to the Workbench with their surface unchanged.
 
 **Rewards**: 1–3 Stars per Level, and 1★ unlocks the next space on the Board. The Board shows each Level's best Stars. Using a Hint caps that Level at 2★.
 
@@ -140,4 +140,4 @@ Zhao, Lowther and Shene, *A Tool for Teaching Curve Design* (Michigan Tech, NSF 
 
 ## 10. Still open
 
-- The course test models (open patch, vase, torus) and their reference values: where are they? Probably in the exercise handout on OLAT or in the course repo.
+- Nothing at the moment. (The course test models don't exist; Reference models replace them, see §3.1.)

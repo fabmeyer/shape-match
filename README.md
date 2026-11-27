@@ -61,7 +61,7 @@ are imported with `?raw`.
 | `src/errorPass.ts` | Shape distance on the GPU (`shaders/distance.wgsl`, or `shaders/paired.wgsl` for the Paired distance, with `shaders/align.wgsl` for the best fit, then `shaders/reduce.wgsl`); its per-sample distances feed the heatmap (`fs_heat` in `shaders/surface.wgsl`) |
 | `src/alignment.ts` | The best fit: turns and moves the Learner surface onto the Target before the Paired distance (Horn 1987, closed form); CPU reference of `shaders/align.wgsl` |
 | `src/matchShow.ts` | The Hand-in animation: both surfaces slide together, the learner turns into its best fit (model matrices in `shaders/surface.wgsl`) |
-| `src/grader.ts` | Live grading and the Shape match check. `DEFAULT_METRIC` and `DEFAULT_ALIGN` pick the grader for the whole app: `'nearest'` (point to triangle) or `'paired'` (same grid point), lined up or not (default: paired, lined up); Developer → Grader switches it live |
+| `src/grader.ts` | Live grading and the Shape match check. `DEFAULT_METRIC` and `DEFAULT_ALIGN` pick the grader for the whole app: `'nearest'` (point to triangle) or `'paired'` (same grid point), lined up or not (default: nearest point, lined up); Developer → Grader switches it live |
 | `src/grading.ts` | Grading rules: Tolerance, Stars, Passed, Match (pure, one config) |
 | `src/grader.ts` | Live grading on the Workbench and the Shape match check of a Hand-in |
 | `src/taskPanel.ts` | Task panel: Match meter, live Stars, Hand in button |

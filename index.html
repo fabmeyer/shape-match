@@ -373,12 +373,13 @@
         </p>
         <textarea id="reportText" class="report-text" rows="8" readonly hidden></textarea>
         <p><button id="snapSolution" class="panel-button" title="Set your surface to the Target (can be undone), to try Hand in and the Result screen">Snap to solution</button></p>
-        <label class="row muted" title="How the Shape distance is measured. Nearest point: every sample to the nearest triangle of the other surface (ADR 0002). Same grid point: sample (i, j) against sample (i, j), the teacher's simpler idea. Lined up: your surface is first turned and moved into its best fit, so only the shape counts">
+        <label class="row muted" title="How the Shape distance is measured. Nearest point: every sample to the nearest triangle of the other surface (ADR 0002). Same grid point: sample (i, j) against sample (i, j), the teacher's simpler idea. Lined up: your surface is first turned and moved into its best fit. Nearest point, lined up (the default) grades the shape only">
           Grader
           <select id="metric">
+            <option value="nearest:aligned">Nearest point, lined up</option>
             <option value="nearest">Nearest point</option>
+            <option value="paired:aligned">Same grid point, lined up</option>
             <option value="paired">Same grid point</option>
-            <option value="aligned">Same grid point, lined up</option>
           </select>
         </label>
         <label class="row muted" title="Samples per direction of the error grid (the knots are added)">

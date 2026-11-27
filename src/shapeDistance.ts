@@ -12,6 +12,9 @@ import { applyFit, bestFit, NO_FIT, type BestFit } from './alignment.ts';
 // samples per direction before the knots are added (samples.ts); adjustable per call
 export const ERROR_RES = 64;
 
+// refinements of the best fit with the nearest points (ICP) before the nearest-point distance, see shapeDistance
+export const ICP_STEPS = 8; // each step shrinks a misfit by about a third: 8 steps leave ~3 % of it
+
 // a triangle with less than this squared doubled area is a point or a line (a collapsed cap, a tip):
 // it is left out, its neighbours cover the same place
 const DEGENERATE = 1e-20;
@@ -42,6 +45,7 @@ export interface DistanceOptions {
   res?: number;                    // samples per direction before the knots, default ERROR_RES
   mode?: 'triangle' | 'point';     // 'point' = nearest sample instead of nearest triangle, only for experiment E1
   learnerShift?: number;           // shifts the Learner's grid by this fraction of a cell (Noise floor: 0.5)
+  align?: boolean;                 // line up first: the best fit from the pairs of the same grid point (alignment.ts)
 }
 
 // ---------------------------------------------------------
@@ -109,13 +113,25 @@ export function boundingDiagonal(s: SampledSurface): number {
 // ---------------------------------------------------------
 
 // squared distance from p to the triangle (a, b, c)
-// Ericson, Real-Time Collision Detection, 5.1.5: find the Voronoi region of p (a corner, an edge or the inside)
 export function pointTriangleDistance2(
   px: number, py: number, pz: number,
   ax: number, ay: number, az: number,
   bx: number, by: number, bz: number,
   cx: number, cy: number, cz: number,
 ): number {
+  const [qx, qy, qz] = closestOnTriangle(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz);
+  const dx = px - qx, dy = py - qy, dz = pz - qz;
+  return dx * dx + dy * dy + dz * dz;
+}
+
+// the point of the triangle (a, b, c) nearest to p
+// Ericson, Real-Time Collision Detection, 5.1.5: find the Voronoi region of p (a corner, an edge or the inside)
+export function closestOnTriangle(
+  px: number, py: number, pz: number,
+  ax: number, ay: number, az: number,
+  bx: number, by: number, bz: number,
+  cx: number, cy: number, cz: number,
+): [number, number, number] {
   const abx = bx - ax, aby = by - ay, abz = bz - az;
   const acx = cx - ax, acy = cy - ay, acz = cz - az;
   const apx = px - ax, apy = py - ay, apz = pz - az;
@@ -154,8 +170,7 @@ export function pointTriangleDistance2(
       qx = ax + abx * v + acx * w; qy = ay + aby * v + acy * w; qz = az + abz * v + acz * w;
     }
   }
-  const dx = px - qx, dy = py - qy, dz = pz - qz;
-  return dx * dx + dy * dy + dz * dz;
+  return [qx, qy, qz];
 }
 
 // the triangles of a sampled surface as flat corner coordinates (9 per triangle) with a bounding box each,
@@ -197,7 +212,8 @@ function boxDistance2(b: Float64Array, k: number, px: number, py: number, pz: nu
 
 // for every sample of `from`: the distance to the nearest triangle (or sample) of `to`
 // brute force like the GPU, the boxes only skip triangles that can't be nearer
-export function oneSidedDistances(from: SampledSurface, to: SampledSurface, mode: 'triangle' | 'point' = 'triangle'): Float64Array {
+// closest (optional, 3 per sample): receives the nearest point itself (for the best fit's refinement)
+export function oneSidedDistances(from: SampledSurface, to: SampledSurface, mode: 'triangle' | 'point' = 'triangle', closest?: Float64Array): Float64Array {
   const count = from.points.length / 3;
   const out = new Float64Array(count);
   const tris = mode === 'triangle' ? triangles(to) : undefined;
@@ -209,8 +225,9 @@ export function oneSidedDistances(from: SampledSurface, to: SampledSurface, mode
       for (let k = 0; k < tris.count; k++) {
         if (boxDistance2(boxes, k * 6, px, py, pz) >= best) continue;
         const o = k * 9;
-        best = Math.min(best, pointTriangleDistance2(px, py, pz,
-          t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4], t[o + 5], t[o + 6], t[o + 7], t[o + 8]));
+        const q = closestOnTriangle(px, py, pz, t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4], t[o + 5], t[o + 6], t[o + 7], t[o + 8]);
+        const d2 = (px - q[0]) ** 2 + (py - q[1]) ** 2 + (pz - q[2]) ** 2;
+        if (d2 < best) { best = d2; closest?.set(q, s * 3); }
       }
     } else {
       const q = to.points;
@@ -241,15 +258,38 @@ export function combine(a: DistanceSums, b: DistanceSums, diagonal: number): { r
 }
 
 // the Shape distance between the Learner surface and the Target
-export function shapeDistance(target: ControlNet, learner: ControlNet, options: DistanceOptions = {}): ShapeDistance {
-  const { res = ERROR_RES, mode = 'triangle', learnerShift = 0 } = options;
+// with align: the Learner surface is first turned and moved onto the Target, then measured to the nearest
+// point, so only the shape counts:
+//   1. a first best fit from the pairs of the same grid point (as for the Paired distance)
+//   2. ICP_STEPS refinements (ICP, Besl & McKay 1992): each learner sample is paired with its nearest point
+//      on the Target, and the best fit of these pairs is the next one. The pairs of step 1 depend on how the
+//      control points are spread along the surface (a hidden cap point, a ring slid along the profile);
+//      the nearest points don't, so the fit ends up depending on the shape only
+// Needs the same Layout for step 1; with another Layout (after a knot insertion) it measures without it
+export function shapeDistance(target: ControlNet, learner: ControlNet, options: DistanceOptions = {}): ShapeDistance & { fit: BestFit } {
+  const { res = ERROR_RES, mode = 'triangle', learnerShift = 0, align = false } = options;
   const t = sampleSurface(target, res);
   const l = sampleSurface(learner, res, learnerShift);
+  let fit = NO_FIT;
+  if (align && l.resU === t.resU && l.resV === t.resV) {
+    const original = l.points.slice();
+    const moveBy = (f: BestFit) => {
+      for (let k = 0; k < original.length; k += 3) l.points.set(applyFit(f, [original[k], original[k + 1], original[k + 2]]), k);
+    };
+    fit = bestFit(original, t.points, t.weights);
+    const closest = new Float64Array(original.length);
+    for (let step = 0; step < ICP_STEPS; step++) {
+      moveBy(fit);
+      oneSidedDistances(l, t, mode, closest);
+      fit = bestFit(original, closest, l.weights);
+    }
+    moveBy(fit);
+  }
   const diagonal = boundingDiagonal(t);
   const learnerDistances = oneSidedDistances(l, t, mode);
   const targetDistances = oneSidedDistances(t, l, mode);
   const { rms, hausdorff } = combine(sums(learnerDistances, l.weights), sums(targetDistances, t.weights), diagonal);
-  return { rms, hausdorff, diagonal, learnerDistances, targetDistances };
+  return { rms, hausdorff, diagonal, learnerDistances, targetDistances, fit };
 }
 
 // ---------------------------------------------------------

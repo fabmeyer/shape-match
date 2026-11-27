@@ -268,14 +268,14 @@ const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphEle
 const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
 errorResSelect.addEventListener('change', () => { grader.resolution = Number(errorResSelect.value); });
 // the grader: switching it also picks its error grid (64 for nearest point, 128 for the same grid point)
-// 'aligned' = the same grid point after the best fit (turn and move the learner onto the Target first)
+// ':aligned' = after the best fit (turn and move the learner onto the Target first)
 const metricSelect = document.getElementById('metric') as HTMLSelectElement;
-metricSelect.value = grader.metric === 'paired' && grader.align ? 'aligned' : grader.metric;
+metricSelect.value = grader.metric + (grader.align ? ':aligned' : '');
 errorResSelect.value = String(grader.resolution);
 metricSelect.addEventListener('change', () => {
-  const choice = metricSelect.value;
-  grader.align = choice === 'aligned';
-  grader.metric = (choice === 'aligned' ? 'paired' : choice) as Metric;
+  const [metric, aligned] = metricSelect.value.split(':');
+  grader.align = aligned === 'aligned';
+  grader.metric = metric as Metric;
   errorResSelect.value = String(grader.resolution);
   debugLog.log('grader', { metric: grader.metric, align: grader.align, res: grader.resolution });
 });
@@ -400,7 +400,7 @@ function showMeasurement({ distance: d, grade, calibration, ms }: Measurement) {
     ? `${grade.stars}★, Match ${grade.match.toFixed(1)} %, τ ${percent(calibration.tolerance, 3)}, τ_H ${percent(calibration.hausdorffTolerance, 3)}. `
     : 'Calibrating… ';
   distanceInfo.textContent = `${graded}RMS ${percent(d.rms, 3)}, Hausdorff ${percent(d.hausdorff, 2)} of the diagonal `
-    + `(${grader.metric === 'paired' ? (grader.align ? 'same grid point, lined up' : 'same grid point') : 'nearest point'}, error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
+    + `(${grader.metric === 'paired' ? 'same grid point' : 'nearest point'}${grader.align ? ', lined up' : ''}, error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
 }
 
 // ---------------------------------------------------------

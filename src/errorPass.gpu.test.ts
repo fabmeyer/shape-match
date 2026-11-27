@@ -9,13 +9,14 @@ import { calibrate, grade, gradingConfig } from './grading.ts';
 import { ERROR_RES } from './shapeDistance.ts';
 import { readBuffer, requestTestDevice } from './gpuTesting.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
-import { rotate } from './alignment.ts';
+import { NO_FIT, rotate } from './alignment.ts';
 
 const RES = 16; // the CPU reference is brute force, small grids keep it fast
 
 // f32 on the GPU against f64 on the CPU, relative to the diagonal
 const SUM_TOLERANCE = 2e-3;     // relative error of RMS and Hausdorff
 const SAMPLE_TOLERANCE = 2e-5;  // per-sample distance, in units of the diagonal
+const LINED_UP_TOLERANCE = 2e-2; // relative, nearest point after the best fit and its refinements
 
 const shape = (id: string) => allShapes().find((s) => s.id === id)!.net;
 
@@ -215,6 +216,59 @@ describe('lined-up error pass', () => {
     pass.resolution = PAIRED_RES;
     pass.setTarget(task.target);
     pass.setLearner(turned(task.target)); // the right shape in the wrong place counts as right
+    expect(grade(await pass.measure(), calibration, config).stars).toBe(3);
+  });
+});
+
+// the app's grader: the best fit from the pairs of the same grid point, then the nearest-point distance
+describe('nearest point, lined up', () => {
+  const angle = Math.PI / 6;
+  const axis = [1, 2, 2].map((c) => c / 3);
+  const q30 = [...axis.map((c) => c * Math.sin(angle / 2)), Math.cos(angle / 2)] as [number, number, number, number];
+  const turned = (net: ControlNet) => {
+    const out = cloneNet(net);
+    for (let k = 0; k < out.countU * out.countV; k++) {
+      const r = rotate(q30, getPoint(out, k));
+      setPoint(out, k, [r[0] + 0.4, r[1] - 0.2, r[2] + 0.3]);
+    }
+    return out;
+  };
+  beforeAll(() => { pass.metric = 'nearest'; pass.align = true; pass.resolution = RES; });
+  afterAll(() => { pass.align = false; pass.resolution = RES; });
+
+  // the different Layouts can't be paired: both measure without the best fit
+  it.each([...pairs, ['ball against itself turned and moved', shape('ball'), turned(shape('ball'))] as const])(
+    'matches the CPU reference: %s', async (_, target, learner) => {
+      pass.setTarget(target);
+      pass.setLearner(learner);
+      const gpu = await pass.measure();
+      const cpu = shapeDistance(target, learner, { res: RES, align: true });
+      // 8 refinements in f32 drift a little from f64 when the shapes are far apart (a start, cup against mushroom)
+      const close = (g: number, c: number) => expect(Math.abs(g - c)).toBeLessThanOrEqual(Math.max(LINED_UP_TOLERANCE * c, ZERO_TOLERANCE));
+      close(gpu.rms, cpu.rms);
+      close(gpu.hausdorff, cpu.hausdorff);
+      if (cpu.fit === NO_FIT) expect(gpu.fit).toBeUndefined(); // different Layouts: no pairs, no best fit
+      // the turn is only well defined when the shapes match; far apart (a squashed start) f32 and f64 can end
+      // a few thousandths apart, which changes nothing there: such a surface gets 0 Stars either way
+      else gpu.fit!.rotation.forEach((c, k) => expect(Math.abs(c - cpu.fit.rotation[k])).toBeLessThan(cpu.rms < 0.01 ? 1e-4 : 1e-2));
+    });
+
+  it('finds the turn back: a turned Target fits to 0', async () => {
+    pass.setTarget(shape('house'));
+    pass.setLearner(turned(shape('house')));
+    const d = await pass.measure();
+    expect(d.rms).toBeLessThan(1e-5);
+    [-q30[0], -q30[1], -q30[2], q30[3]].forEach((c, k) => expect(d.fit!.rotation[k]).toBeCloseTo(c, 4));
+  });
+
+  it.each(allTasks())('$id at 64: the start gives 0 Stars, the Target 3 Stars', async (task) => {
+    const config = gradingConfig(task.grading);
+    const level = await measureLevel(device, createTessellatePipeline(device), task.target, task.start, ERROR_RES, 'nearest', true);
+    const calibration = calibrate(level.noise, level.start, config);
+    expect(grade(level.start, calibration, config).stars).toBe(0);
+    pass.resolution = ERROR_RES;
+    pass.setTarget(task.target);
+    pass.setLearner(turned(task.target));
     expect(grade(await pass.measure(), calibration, config).stars).toBe(3);
   });
 });

@@ -18,6 +18,7 @@ export const RESULT_COUNTDOWN_MS = 4000;
 export interface GameHost {
   loadTask(task: Task): void;                  // puts the Task on the Workbench
   showBest(best: LevelBest | undefined): void; // the Best of the current Level in the Task panel
+  onWorkbench?(): void;                        // the Workbench is in front again (ends the Hand-in animation)
 }
 
 type ScreenName = 'title' | 'board' | 'order' | 'result';
@@ -58,6 +59,7 @@ export class Game {
     this.stopResult?.();
     this.stopResult = undefined;
     for (const [key, el] of Object.entries(this.screens)) el.hidden = key !== name;
+    if (name !== 'result') this.host.onWorkbench?.(); // leaving the Result: the surfaces go back to their places
     debugLog.log('screen', { name: name ?? 'workbench' });
   }
 

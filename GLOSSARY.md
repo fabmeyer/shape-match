@@ -26,6 +26,14 @@ _Avoid_: Test model, course model
 A non-negative number that says how far the Learner surface is from the Target as shapes, independent of how either is parametrised. It is a two-sided Chamfer distance measured to triangles (ADR 0002), relative to the Target's size. Lower is better, and 0 means identical.
 _Avoid_: Similarity, error, score
 
+**Paired distance**:
+The simpler way to measure the Shape distance, suggested by our teacher. Both surfaces are evaluated on the same 128 × 128 grid of (u, v) values, and point (i, j) of the Learner surface is compared with point (i, j) of the Target; no search for the nearest point. It needs one Layout for both (ADR 0001). It never passes a wrong shape, but a correct shape whose control points are spread differently along it (for example the Tent's cap points) counts as off. It has no Noise floor: the Target against itself is exactly 0. See docs/research/shape-distance-parameter-wise.md.
+_Avoid_: Parameter distance, L2 distance
+
+**Best fit**:
+Before the Paired distance is measured, the Learner surface is turned and moved so that it lies on the Target as well as possible; only the shape counts, not where it stands or how it is turned (its size still counts). Because point (i, j) belongs to point (i, j), the best fit has an exact formula (Horn 1987), computed on the GPU. The Hand-in animation shows it. See docs/research/shape-distance-alignment.md.
+_Avoid_: Registration, superposition, alignment (in the UI)
+
 **Match**:
 The Shape distance shown to the learner as a percentage, where 100 % means identical. It is only a way of presenting the distance, not a second measure.
 _Avoid_: Similarity, accuracy

@@ -14,6 +14,7 @@ export interface SurfacePipelines {
   tessellate: GPUComputePipeline;
   surface: GPURenderPipeline;
   surfaceHeat: GPURenderPipeline; // the same surface with the heatmap (fs_heat in surface.wgsl)
+  surfaceGhost: GPURenderPipeline; // see-through (fs_ghost), for the Target over the Learner surface
   points: GPURenderPipeline;
   polygon: GPURenderPipeline;
   stems: GPURenderPipeline;
@@ -32,6 +33,7 @@ export class SurfaceGpu {
   private segmentCount: number;
   private surfaceGroup: GPUBindGroup;
   private surfaceHeatGroup: GPUBindGroup; // 'auto' layouts belong to one pipeline: its own group 0
+  private surfaceGhostGroup: GPUBindGroup;
   private pointsGroup: GPUBindGroup;
   private polygonGroup: GPUBindGroup;
   private stemsGroup: GPUBindGroup;
@@ -80,6 +82,7 @@ export class SurfaceGpu {
     });
     this.surfaceGroup = group(pipelines.surface, [camera, color]);
     this.surfaceHeatGroup = group(pipelines.surfaceHeat, [camera, color]);
+    this.surfaceGhostGroup = group(pipelines.surfaceGhost, [camera, color]);
     this.pointsGroup = group(pipelines.points, [camera, controlPoints, this.flags]);
     this.polygonGroup = group(pipelines.polygon, [camera, controlPoints, segmentBuffer]);
     this.stemsGroup = group(pipelines.stems, [camera, controlPoints]);
@@ -103,8 +106,12 @@ export class SurfaceGpu {
   }
 
   // heat: the heatmap's group 1 (scale, samples, distances), or nothing for the plain surface
-  drawSurface(pass: GPURenderPassEncoder, heat?: GPUBindGroup): void {
-    if (heat) {
+  // ghost: see-through instead (draw it after the opaque surfaces)
+  drawSurface(pass: GPURenderPassEncoder, heat?: GPUBindGroup, ghost = false): void {
+    if (ghost) {
+      pass.setPipeline(this.pipelines.surfaceGhost);
+      pass.setBindGroup(0, this.surfaceGhostGroup);
+    } else if (heat) {
       pass.setPipeline(this.pipelines.surfaceHeat);
       pass.setBindGroup(0, this.surfaceHeatGroup);
       pass.setBindGroup(1, heat);

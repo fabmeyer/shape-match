@@ -7,7 +7,14 @@ struct Camera {
 };
 
 @group(0) @binding(0) var<uniform> camera : Camera;
-@group(0) @binding(1) var<uniform> surfaceColor : vec4f; // blue for the learner, orange for the target
+// per surface: its colour (blue for the learner, orange for the target) and where it is drawn. The model
+// matrix moves the drawing only (the Hand-in animation: slide together, then the best fit); it is a turn
+// plus a move, so it turns the normals the same way
+struct Surface {
+  color : vec4f,
+  model : mat4x4f,
+};
+@group(0) @binding(1) var<uniform> surface : Surface;
 
 struct VertexOut {
   @builtin(position) position : vec4f,
@@ -25,9 +32,10 @@ fn toCamera(p : vec3f) -> vec3f {
 @vertex
 fn vs_main(@location(0) position : vec4f, @location(1) normal : vec4f) -> VertexOut {
   var out : VertexOut;
-  out.position = camera.viewProjection * vec4f(position.xyz, 1.0);
-  out.world = position.xyz;
-  out.normal = normal.xyz;
+  let world = (surface.model * vec4f(position.xyz, 1.0)).xyz;
+  out.position = camera.viewProjection * vec4f(world, 1.0);
+  out.world = world;
+  out.normal = (surface.model * vec4f(normal.xyz, 0.0)).xyz;
   out.uv = vec2f(position.w, normal.w);
   return out;
 }
@@ -52,7 +60,15 @@ fn lit(in : VertexOut, base : vec3f) -> vec4f {
 
 @fragment
 fn fs_main(in : VertexOut) -> @location(0) vec4f {
-  return lit(in, surfaceColor.rgb);
+  return lit(in, surface.color.rgb);
+}
+
+// the Target lying over the Learner surface during the Hand-in animation: see-through, so both show
+const GHOST_ALPHA : f32 = 0.45;
+
+@fragment
+fn fs_ghost(in : VertexOut) -> @location(0) vec4f {
+  return vec4f(lit(in, surface.color.rgb).rgb, GHOST_ALPHA);
 }
 
 // ---------------------------------------------------------
@@ -109,5 +125,5 @@ fn heatColor(d : f32, base : vec3f) -> vec3f {
 
 @fragment
 fn fs_heat(in : VertexOut) -> @location(0) vec4f {
-  return lit(in, heatColor(heatDistance(in.uv), surfaceColor.rgb));
+  return lit(in, heatColor(heatDistance(in.uv), surface.color.rgb));
 }

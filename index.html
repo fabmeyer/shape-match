@@ -40,6 +40,13 @@
     #toolbar .icon-button:hover:not(:disabled) { background: #3a3f4b; border-color: #6b7280; }
     #toolbar .icon-button:active:not(:disabled) { background: #4a7bd0; border-color: #4a7bd0; }
     #toolbar .icon-button[aria-pressed="true"] { background: #4a7bd0; border-color: #4a7bd0; color: #fff; }
+    /* the Hand-in animation: a label over the 3D view, and no editing meanwhile */
+    #matchStatus {
+      position: fixed; top: 96px; left: calc((100vw - 330px) / 2); transform: translateX(-50%);
+      padding: 8px 18px; border-radius: 999px; background: rgba(20, 22, 28, 0.85); border: 1px solid #4a7bd0;
+      color: #fff; font-weight: 600; font-size: 15px; pointer-events: none; z-index: 5;
+    }
+    body.matching #gpuCanvas, body.matching #toolbar, body.matching #side { pointer-events: none; }
     #toolbar .icon-button:disabled { background: transparent; border-color: #333844; color: #5c606b; }
     #toolbar .icon-button:focus-visible { outline: 2px solid #8ab4f8; outline-offset: 2px; }
     .icon-button svg { width: 18px; height: 18px; }
@@ -151,6 +158,7 @@
 </head>
 <body>
   <canvas id="gpuCanvas"></canvas>
+  <div id="matchStatus" role="status" aria-live="polite" hidden></div>
 
   <div id="toolbar">
     <div class="group">
@@ -365,6 +373,14 @@
         </p>
         <textarea id="reportText" class="report-text" rows="8" readonly hidden></textarea>
         <p><button id="snapSolution" class="panel-button" title="Set your surface to the Target (can be undone), to try Hand in and the Result screen">Snap to solution</button></p>
+        <label class="row muted" title="How the Shape distance is measured. Nearest point: every sample to the nearest triangle of the other surface (ADR 0002). Same grid point: sample (i, j) against sample (i, j), the teacher's simpler idea. Lined up: your surface is first turned and moved into its best fit, so only the shape counts">
+          Grader
+          <select id="metric">
+            <option value="nearest">Nearest point</option>
+            <option value="paired">Same grid point</option>
+            <option value="aligned">Same grid point, lined up</option>
+          </select>
+        </label>
         <label class="row muted" title="Samples per direction of the error grid (the knots are added)">
           Error grid
           <select id="errorRes">

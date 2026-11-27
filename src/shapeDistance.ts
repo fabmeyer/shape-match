@@ -7,6 +7,7 @@
 import type { ControlNet } from './controlNet.ts';
 import { evaluate } from './nurbs.ts';
 import { samplePositions } from './samples.ts';
+import { applyFit, bestFit, NO_FIT, type BestFit } from './alignment.ts';
 
 // samples per direction before the knots are added (samples.ts); adjustable per call
 export const ERROR_RES = 64;
@@ -249,4 +250,38 @@ export function shapeDistance(target: ControlNet, learner: ControlNet, options: 
   const targetDistances = oneSidedDistances(t, l, mode);
   const { rms, hausdorff } = combine(sums(learnerDistances, l.weights), sums(targetDistances, t.weights), diagonal);
   return { rms, hausdorff, diagonal, learnerDistances, targetDistances };
+}
+
+// ---------------------------------------------------------
+// The Paired distance: the teacher's simpler grader
+// ---------------------------------------------------------
+// both surfaces on the same (u, v) grid; sample (i, j) of the Learner surface is compared with sample (i, j)
+// of the Target, no search. Each pair counts with the area its Target sample stands for. RMS and max,
+// divided by the Target's diagonal like the Shape distance.
+// It is never smaller than the geometric gap, so it never passes a wrong shape, but a correct shape whose
+// points are spread differently along the surface (a cap point moved inside the end face, other weights
+// for the same circle) counts as off (docs/research/shape-distance-parameter-wise.md).
+// It needs one Layout for both surfaces (ADR 0001), so both grids have the same parameter values.
+
+// which grader measures the Shape distance: nearest point on triangles (ADR 0002) or the Paired distance
+export type Metric = 'nearest' | 'paired';
+export const PAIRED_RES = 128; // the teacher's grid: cheap enough for 128 x 128
+
+// align: turn and move the Learner surface onto the Target first (the best fit, alignment.ts), so only
+// the shape counts, not where it stands or how it is turned
+export function pairedDistance(target: ControlNet, learner: ControlNet, res = PAIRED_RES, align = false): ShapeDistance & { fit: BestFit } {
+  const t = sampleSurface(target, res);
+  const l = sampleSurface(learner, res);
+  if (t.resU !== l.resU || t.resV !== l.resV) throw new Error('The Paired distance needs the same Layout for both surfaces');
+  const fit = align ? bestFit(l.points, t.points, t.weights) : NO_FIT;
+  const diagonal = boundingDiagonal(t);
+  const d = new Float64Array(t.resU * t.resV);
+  for (let s = 0; s < d.length; s++) {
+    const k = s * 3;
+    const p = align ? applyFit(fit, [l.points[k], l.points[k + 1], l.points[k + 2]]) : [l.points[k], l.points[k + 1], l.points[k + 2]];
+    d[s] = Math.hypot(t.points[k] - p[0], t.points[k + 1] - p[1], t.points[k + 2] - p[2]);
+  }
+  const both = sums(d, t.weights);
+  const { rms, hausdorff } = combine(both, both, diagonal);
+  return { rms, hausdorff, diagonal, learnerDistances: d, targetDistances: d, fit };
 }

@@ -5,8 +5,18 @@
 //   check():   the Shape match check. A fresh measurement of the surface as it is now, after the calibration
 import type { ControlNet } from './controlNet.ts';
 import { ErrorPass, measureLevel, type GpuShapeDistance, type HeatSource } from './errorPass.ts';
+import { ERROR_RES, PAIRED_RES, type Metric } from './shapeDistance.ts';
 import { debugLog } from './debugLog.ts';
 import { calibrate, grade, gradingConfig, starMarks, type Calibration, type Grade, type GradingConfig } from './grading.ts';
+
+// the grader the app uses: 'nearest' (point to triangle, ADR 0002) or 'paired' (the teacher's idea: the same
+// grid point on both surfaces), and whether the surfaces are lined up first (the best fit, alignment.ts:
+// only with 'paired'). Change these lines to switch the app; the Developer section can switch live
+export const DEFAULT_METRIC: Metric = 'paired';
+export const DEFAULT_ALIGN = true;
+
+// the error grid each grader starts on: point to triangle is brute force (64), paired is cheap (128)
+export const METRIC_RES: Record<Metric, number> = { nearest: ERROR_RES, paired: PAIRED_RES };
 
 export interface Measurement {
   distance: GpuShapeDistance;
@@ -36,6 +46,29 @@ export class Grader {
     this.device = device;
     this.tessellatePipeline = tessellatePipeline;
     this.pass = new ErrorPass(device, tessellatePipeline);
+    this.pass.align = DEFAULT_ALIGN;
+    this.metric = DEFAULT_METRIC;
+  }
+
+  // line up before measuring (only with the Paired distance); the Level is calibrated again with it
+  get align(): boolean {
+    return this.pass.align;
+  }
+
+  set align(on: boolean) {
+    this.pass.align = on;
+    this.recalibrate();
+  }
+
+  get metric(): Metric {
+    return this.pass.metric;
+  }
+
+  // another grader: its own error grid, and the Level is calibrated again with it
+  set metric(metric: Metric) {
+    this.pass.metric = metric;
+    this.pass.resolution = METRIC_RES[metric];
+    this.recalibrate();
   }
 
   get resolution(): number {
@@ -119,11 +152,11 @@ export class Grader {
     if (!this.level) return;
     const id = ++this.levelId;
     const { target, start } = this.level;
-    this.calibrating = measureLevel(this.device, this.tessellatePipeline, target, start, this.pass.resolution)
+    this.calibrating = measureLevel(this.device, this.tessellatePipeline, target, start, this.pass.resolution, this.pass.metric, this.pass.align)
       .then(({ noise, start: startDistance }) => {
         if (id !== this.levelId) return; // another Level loaded meanwhile
         this.calibration = calibrate(noise, startDistance, this.config);
-        debugLog.log('calibration', { res: noise.res, noiseRms: noise.rms, noiseHausdorff: noise.hausdorff, ...this.calibration });
+        debugLog.log('calibration', { metric: this.pass.metric, align: this.pass.align, res: noise.res, noiseRms: noise.rms, noiseHausdorff: noise.hausdorff, ...this.calibration });
         this.dirty = true; // grade the current surface now that the Level is calibrated
       })
       .catch((e) => this.onError?.(e));

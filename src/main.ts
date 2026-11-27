@@ -12,6 +12,9 @@ import { allTasks, cloneNet, sameLayout, shiftedPoints, TARGET_OFFSET, toolsText
 import { SurfaceGpu, type SurfacePipelines } from './surfaceGpu.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
 import { Grader, type Measurement } from './grader.ts';
+import type { Metric } from './shapeDistance.ts';
+import type { BestFit } from './alignment.ts';
+import { ALIGN_MS, ease, HOLD_MS, showModels, SLIDE_MS } from './matchShow.ts';
 import { TaskPanel } from './taskPanel.ts';
 import { Game } from './game.ts';
 import { browserStorage, loadProgress } from './progress.ts';
@@ -85,9 +88,11 @@ const tessellatePipeline = createTessellatePipeline(device);
 
 const surfaceModule = device.createShaderModule({ label: 'surface', code: surfaceCode });
 // two pipelines from the same shader: the plain surface, and the Learner surface with the heatmap
-function surfacePipelineWith(fragment: 'fs_main' | 'fs_heat'): GPURenderPipeline {
+// plus a see-through one for the Target lying over the Learner surface in the Hand-in animation
+function surfacePipelineWith(fragment: 'fs_main' | 'fs_heat' | 'fs_ghost'): GPURenderPipeline {
+  const ghost = fragment === 'fs_ghost';
   return device.createRenderPipeline({
-    label: fragment === 'fs_heat' ? 'surface with heatmap' : 'surface',
+    label: { fs_main: 'surface', fs_heat: 'surface with heatmap', fs_ghost: 'see-through surface' }[fragment],
     layout: 'auto',
     vertex: {
       module: surfaceModule,
@@ -97,13 +102,20 @@ function surfacePipelineWith(fragment: 'fs_main' | 'fs_heat'): GPURenderPipeline
         { arrayStride: 16, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x4' }] }, // normals (and v)
       ],
     },
-    fragment: { module: surfaceModule, entryPoint: fragment, targets: [{ format }] },
+    fragment: {
+      module: surfaceModule,
+      entryPoint: fragment,
+      targets: [ghost
+        ? { format, blend: { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }
+        : { format }],
+    },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
-    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: !ghost, depthCompare: 'less' },
   });
 }
 const surfacePipeline = surfacePipelineWith('fs_main');
 const surfaceHeatPipeline = surfacePipelineWith('fs_heat');
+const surfaceGhostPipeline = surfacePipelineWith('fs_ghost');
 
 const pointsModule = device.createShaderModule({ label: 'points', code: pointsCode });
 const pointsPipeline = device.createRenderPipeline({
@@ -167,15 +179,17 @@ const pipelines: SurfacePipelines = {
   tessellate: tessellatePipeline,
   surface: surfacePipeline,
   surfaceHeat: surfaceHeatPipeline,
+  surfaceGhost: surfaceGhostPipeline,
   points: pointsPipeline,
   polygon: polygonPipeline,
   stems: stemsPipeline,
 };
 
-// surface colours (surfaceColor in surface.wgsl)
+// per surface: its colour and its model matrix (Surface in surface.wgsl); the matrix only moves in the Hand-in animation
+const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 function colorBuffer(label: string, rgb: [number, number, number]): GPUBuffer {
-  const buffer = device.createBuffer({ label, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(buffer, 0, new Float32Array([...rgb, 1]));
+  const buffer = device.createBuffer({ label, size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(buffer, 0, new Float32Array([...rgb, 1, ...IDENTITY]));
   return buffer;
 }
 const learnerColorBuffer = colorBuffer('learner colour', [0.45, 0.55, 0.75]);
@@ -253,6 +267,18 @@ const grader = new Grader(device, tessellatePipeline);
 const distanceInfo = document.getElementById('distanceInfo') as HTMLParagraphElement;
 const errorResSelect = document.getElementById('errorRes') as HTMLSelectElement;
 errorResSelect.addEventListener('change', () => { grader.resolution = Number(errorResSelect.value); });
+// the grader: switching it also picks its error grid (64 for nearest point, 128 for the same grid point)
+// 'aligned' = the same grid point after the best fit (turn and move the learner onto the Target first)
+const metricSelect = document.getElementById('metric') as HTMLSelectElement;
+metricSelect.value = grader.metric === 'paired' && grader.align ? 'aligned' : grader.metric;
+errorResSelect.value = String(grader.resolution);
+metricSelect.addEventListener('change', () => {
+  const choice = metricSelect.value;
+  grader.align = choice === 'aligned';
+  grader.metric = (choice === 'aligned' ? 'paired' : choice) as Metric;
+  errorResSelect.value = String(grader.resolution);
+  debugLog.log('grader', { metric: grader.metric, align: grader.align, res: grader.resolution });
+});
 grader.onError = (e) => {
   distanceInfo.textContent = `Error pass failed: ${errorMessage(e)}`;
   debugLog.log('error', { in: 'error pass', message: errorMessage(e) });
@@ -313,16 +339,56 @@ function currentHeatGroup(): GPUBindGroup | undefined {
 const taskPanel = new TaskPanel();
 taskPanel.onHandIn = handIn;
 
-// Hand-in: the Shape match check on the surface as it is now
+// Hand-in: the Shape match check on the surface as it is now, shown as an animation (matchShow.ts):
+// the two surfaces slide together, the learner turns into its best fit, then the Result screen.
+// The GPU measures meanwhile; the animation waits for it before the best fit
+interface MatchShow {
+  slideStart: number;
+  alignStart?: number;
+  fit?: BestFit;
+}
+let matchShow: MatchShow | null = null;
+const matchStatus = document.getElementById('matchStatus') as HTMLElement;
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+function setMatchStatus(text: string) {
+  matchStatus.textContent = text;
+  matchStatus.hidden = text === '';
+}
+
+// back to the Workbench: both surfaces where they belong
+function endMatchShow() {
+  matchShow = null;
+  device.queue.writeBuffer(learnerColorBuffer, 16, IDENTITY);
+  device.queue.writeBuffer(targetColorBuffer, 16, IDENTITY);
+}
+
 async function handIn() {
+  if (matchShow) return;
+  const motion = !reducedMotion();
   taskPanel.setChecking(true);
+  document.body.classList.add('matching'); // no editing while the shapes move
+  matchShow = { slideStart: performance.now() - (motion ? 0 : SLIDE_MS) };
   try {
-    const { grade } = await grader.check();
+    const checking = grader.check();
+    setMatchStatus('Moving the shapes together…');
+    await wait(motion ? SLIDE_MS : 0);
+    setMatchStatus('Finding the best fit…');
+    const { grade, distance } = await checking;
+    matchShow.fit = distance.fit;
+    matchShow.alignStart = performance.now() - (motion ? 0 : ALIGN_MS);
+    await wait(motion && distance.fit ? ALIGN_MS : 0);
+    setMatchStatus(`Match ${grade.match.toFixed(1)} %`);
+    await wait(motion ? HOLD_MS : 0);
     game.handIn(task, grade);
   } catch (e) {
+    endMatchShow();
     distanceInfo.textContent = `Shape match check failed: ${errorMessage(e)}`;
     debugLog.log('error', { in: 'hand-in', message: errorMessage(e) });
   } finally {
+    setMatchStatus('');
+    document.body.classList.remove('matching');
     taskPanel.setChecking(false);
   }
 }
@@ -334,7 +400,7 @@ function showMeasurement({ distance: d, grade, calibration, ms }: Measurement) {
     ? `${grade.stars}★, Match ${grade.match.toFixed(1)} %, τ ${percent(calibration.tolerance, 3)}, τ_H ${percent(calibration.hausdorffTolerance, 3)}. `
     : 'Calibrating… ';
   distanceInfo.textContent = `${graded}RMS ${percent(d.rms, 3)}, Hausdorff ${percent(d.hausdorff, 2)} of the diagonal `
-    + `(error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
+    + `(${grader.metric === 'paired' ? (grader.align ? 'same grid point, lined up' : 'same grid point') : 'nearest point'}, error grid ${d.res}, ${ms.toFixed(1)} ms round trip)`;
 }
 
 // ---------------------------------------------------------
@@ -500,6 +566,8 @@ async function copyDebugReport() {
       mode,
       camera: { view: camera.view, flipped: camera.flipped, target: [...camera.target], distance: camera.distance, orientation: [...camera.orientation] },
       switches: { showPoints, showPolygon, showSolution, showWalkers, showMarker, showHeatmap },
+      grader: grader.metric,
+      lineUp: grader.align,
       errorGrid: grader.resolution,
       calibration: lastMeasurement?.calibration,
       lastMeasurement: lastMeasurement && { distance: lastMeasurement.distance, grade: lastMeasurement.grade },
@@ -537,6 +605,7 @@ undoButton.addEventListener('click', undo);
 document.getElementById('reset')!.addEventListener('click', resetPoints);
 window.addEventListener('keydown', (e) => {
   const typing = e.target instanceof HTMLInputElement && e.target.type === 'number'; // Ctrl+Z undoes typing there
+  if (matchShow) return; // the Hand-in animation is running
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !typing) {
     e.preventDefault();
     undo();
@@ -669,7 +738,7 @@ function loadTask(next: Task) {
 
 // the game screens in front of the Workbench: Title, Board, Order, Result (game.ts)
 // the GPU needs a Task from the first frame on, also behind the Title
-const game = new Game(tasks, { loadTask, showBest: (best) => taskPanel.setBest(best) }, browserStorage());
+const game = new Game(tasks, { loadTask, showBest: (best) => taskPanel.setBest(best), onWorkbench: endMatchShow }, browserStorage());
 if (requested) {
   game.play(requested);
 } else {
@@ -783,6 +852,19 @@ function frame() {
     device.queue.writeBuffer(gizmoBuffer, 0, gizmoData);
   }
 
+  // the Hand-in animation: only the model matrices move; points, arrows and helpers are hidden meanwhile
+  let ghostTarget = false;
+  if (matchShow) {
+    const now = performance.now();
+    const slide = ease((now - matchShow.slideStart) / SLIDE_MS);
+    const align = matchShow.alignStart === undefined ? 0 : ease((now - matchShow.alignStart) / ALIGN_MS);
+    const models = showModels(slide, align, matchShow.fit, TARGET_OFFSET);
+    device.queue.writeBuffer(learnerColorBuffer, 16, models.learner as Float32Array<ArrayBuffer>);
+    device.queue.writeBuffer(targetColorBuffer, 16, models.target as Float32Array<ArrayBuffer>);
+    ghostTarget = slide > 0;
+  }
+  const helpers = !matchShow;
+
   const encoder = device.createCommandEncoder();
 
   // evaluate a surface again, but only if its control points changed
@@ -809,9 +891,9 @@ function frame() {
   });
 
   learnerGpu.drawSurface(pass, currentHeatGroup());
-  targetGpu.drawSurface(pass);
+  targetGpu.drawSurface(pass, undefined, ghostTarget); // see-through: drawn after the opaque learner
 
-  if (showWalkers) {
+  if (helpers && showWalkers) {
     pass.setPipeline(curvesBehindPipeline);
     pass.setBindGroup(0, curvesBindGroups[1]);
     pass.draw(6, walkerSegmentCount);
@@ -820,29 +902,29 @@ function frame() {
     pass.draw(6, walkerSegmentCount);
   }
 
-  if (showPoints) learnerGpu.drawStems(pass);
-  if (showPolygon) learnerGpu.drawPolygon(pass);
+  if (helpers && showPoints) learnerGpu.drawStems(pass);
+  if (helpers && showPolygon) learnerGpu.drawPolygon(pass);
 
-  if (showSolution) {
+  if (helpers && showSolution) {
     if (showPolygon) targetGpu.drawPolygon(pass);
     targetGpu.drawPoints(pass);
   }
 
-  if (showPoints) learnerGpu.drawPoints(pass);
+  if (helpers && showPoints) learnerGpu.drawPoints(pass);
 
   // the walkers and the marker are drawn like control points
   pass.setPipeline(pointsPipeline);
-  if (showWalkers) {
+  if (helpers && showWalkers) {
     pass.setBindGroup(0, walkerPointsBindGroup!);
     pass.draw(6, net.countV);
   }
 
-  if (showMarker) {
+  if (helpers && showMarker) {
     pass.setBindGroup(0, markerBindGroup);
     pass.draw(6, 1);
   }
 
-  if (gizmo) {
+  if (helpers && gizmo) {
     pass.setPipeline(gizmoPipeline);
     pass.setBindGroup(0, gizmoBindGroup);
     pass.draw(9, 3);

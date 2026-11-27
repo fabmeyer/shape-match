@@ -2,13 +2,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { flatControlNet, getPoint, setPoint, type ControlNet } from './controlNet.ts';
 import { ErrorPass, measureLevel } from './errorPass.ts';
-import { shapeDistance } from './shapeDistance.ts';
+import { pairedDistance, PAIRED_RES, shapeDistance } from './shapeDistance.ts';
 import { allShapes } from './shapes.ts';
 import { allTasks, cloneNet } from './target.ts';
 import { calibrate, grade, gradingConfig } from './grading.ts';
 import { ERROR_RES } from './shapeDistance.ts';
 import { readBuffer, requestTestDevice } from './gpuTesting.ts';
 import { createTessellatePipeline } from './surfaceGrid.ts';
+import { rotate } from './alignment.ts';
 
 const RES = 16; // the CPU reference is brute force, small grids keep it fast
 
@@ -129,6 +130,91 @@ describe('every Task', () => {
     pass.resolution = ERROR_RES;
     pass.setTarget(task.target);
     pass.setLearner(task.target);
+    expect(grade(await pass.measure(), calibration, config).stars).toBe(3);
+  });
+});
+
+// the teacher's grader: the same grid point on both surfaces
+describe('paired error pass', () => {
+  const samePairs = pairs.filter(([name]) => !name.startsWith('different Layouts'));
+  beforeAll(() => { pass.metric = 'paired'; });
+  afterAll(() => { pass.metric = 'nearest'; pass.resolution = RES; });
+
+  it.each(samePairs)('matches the CPU reference: %s', async (_, target, learner) => {
+    pass.resolution = RES;
+    pass.setTarget(target);
+    pass.setLearner(learner);
+    const gpu = await pass.measure();
+    const cpu = pairedDistance(target, learner, RES);
+    expectClose(gpu.rms, cpu.rms);
+    expectClose(gpu.hausdorff, cpu.hausdorff);
+    const heat = new Float32Array(await readBuffer(device, pass.learnerDistances!));
+    expect(Math.max(...cpu.learnerDistances.map((d, k) => Math.abs(d - heat[k]))) / cpu.diagonal).toBeLessThan(SAMPLE_TOLERANCE);
+  });
+
+  it('has no Noise floor: the Target against itself is 0', async () => {
+    const level = await measureLevel(device, createTessellatePipeline(device), house.target, house.start, RES, 'paired');
+    expect(level.noise.rms).toBeLessThan(1e-7);
+    expectClose(level.start.rms, pairedDistance(house.target, house.start, RES).rms);
+  });
+
+  it.each(allTasks())('$id at 128: the start gives 0 Stars, the Target 3 Stars', async (task) => {
+    const config = gradingConfig(task.grading);
+    const level = await measureLevel(device, createTessellatePipeline(device), task.target, task.start, PAIRED_RES, 'paired');
+    const calibration = calibrate(level.noise, level.start, config);
+    expect(grade(level.start, calibration, config).stars).toBe(0);
+    pass.resolution = PAIRED_RES;
+    pass.setTarget(task.target);
+    pass.setLearner(task.target);
+    expect(grade(await pass.measure(), calibration, config).stars).toBe(3);
+  });
+});
+
+// the Paired distance after the best fit (align.wgsl): turn and move the learner onto the Target first
+describe('lined-up error pass', () => {
+  const angle = Math.PI / 6;
+  const axis = [1, 2, 2].map((c) => c / 3);
+  const q30 = [...axis.map((c) => c * Math.sin(angle / 2)), Math.cos(angle / 2)] as [number, number, number, number];
+  const turned = (net: ControlNet) => {
+    const out = cloneNet(net);
+    for (let k = 0; k < out.countU * out.countV; k++) {
+      const r = rotate(q30, getPoint(out, k));
+      setPoint(out, k, [r[0] + 0.4, r[1] - 0.2, r[2] + 0.3]);
+    }
+    return out;
+  };
+  beforeAll(() => { pass.metric = 'paired'; pass.align = true; pass.resolution = RES; });
+  afterAll(() => { pass.align = false; pass.metric = 'nearest'; pass.resolution = RES; });
+
+  it.each([...pairs.filter(([name]) => !name.startsWith('different Layouts')), ['ball against itself turned and moved', shape('ball'), turned(shape('ball'))] as const])(
+    'matches the CPU reference: %s', async (_, target, learner) => {
+      pass.setTarget(target);
+      pass.setLearner(learner);
+      const gpu = await pass.measure();
+      const cpu = pairedDistance(target, learner, RES, true);
+      expectClose(gpu.rms, cpu.rms);
+      expectClose(gpu.hausdorff, cpu.hausdorff);
+      gpu.fit!.rotation.forEach((c, k) => expect(c).toBeCloseTo(cpu.fit.rotation[k], 4));
+      gpu.fit!.targetCentre.forEach((c, k) => expect(c).toBeCloseTo(cpu.fit.targetCentre[k], 4));
+    });
+
+  it('finds the turn back: a turned Target fits to 0', async () => {
+    pass.setTarget(shape('house'));
+    pass.setLearner(turned(shape('house')));
+    const d = await pass.measure();
+    expect(d.rms).toBeLessThan(1e-5);
+    // the rotation that undoes q30 is its inverse
+    [-q30[0], -q30[1], -q30[2], q30[3]].forEach((c, k) => expect(d.fit!.rotation[k]).toBeCloseTo(c, 4));
+  });
+
+  it.each(allTasks())('$id at 128: the start gives 0 Stars, the Target 3 Stars', async (task) => {
+    const config = gradingConfig(task.grading);
+    const level = await measureLevel(device, createTessellatePipeline(device), task.target, task.start, PAIRED_RES, 'paired', true);
+    const calibration = calibrate(level.noise, level.start, config);
+    expect(grade(level.start, calibration, config).stars).toBe(0);
+    pass.resolution = PAIRED_RES;
+    pass.setTarget(task.target);
+    pass.setLearner(turned(task.target)); // the right shape in the wrong place counts as right
     expect(grade(await pass.measure(), calibration, config).stars).toBe(3);
   });
 });

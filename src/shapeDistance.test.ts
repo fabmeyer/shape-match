@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { flatControlNet, getPoint, setPoint, type ControlNet } from './controlNet.ts';
 import { allShapes } from './shapes.ts';
-import { pointTriangleDistance2, sampleSurface, shapeDistance } from './shapeDistance.ts';
+import { pairedDistance, pointTriangleDistance2, sampleSurface, shapeDistance } from './shapeDistance.ts';
+import { allTasks } from './target.ts';
 import { cloneNet } from './target.ts';
 
 const RES = 16; // small grids keep the brute force fast
@@ -90,5 +91,44 @@ describe('shapeDistance', () => {
       expect(pointRatio).toBeGreaterThan(1.6);  // h: 2
       expect(pointRatio).toBeLessThan(2.6);
     });
+  });
+});
+
+describe('pairedDistance (the same grid point on both surfaces)', () => {
+  it('is 0 for the Target against itself', () => {
+    const d = pairedDistance(ball, ball, RES);
+    expect(d.rms).toBe(0);
+    expect(d.hausdorff).toBe(0);
+  });
+
+  it('is exactly the shift when the whole surface moves', () => {
+    const d = pairedDistance(ball, moved(ball, 0, 0, 0.1), RES);
+    expect(d.rms * d.diagonal).toBeCloseTo(0.1, 6);
+    expect(d.hausdorff * d.diagonal).toBeCloseTo(0.1, 6);
+  });
+
+  it('is never smaller than the Shape distance: it never passes a wrong shape', () => {
+    for (const task of allTasks()) {
+      const paired = pairedDistance(task.target, task.start, RES);
+      const nearest = shapeDistance(task.target, task.start, { res: RES });
+      expect(paired.hausdorff).toBeGreaterThanOrEqual(nearest.hausdorff * (1 - 1e-9));
+    }
+  });
+
+  // the known limit (docs/research/shape-distance-parameter-wise.md): the Tent's cap point can sit anywhere
+  // inside its end face without changing the shape, but the pairs no longer line up
+  it('counts a correct Tent with its cap points elsewhere as off', () => {
+    const tent = allTasks().find((t) => t.id === 'tent')!;
+    const learner = cloneNet(tent.target);
+    const { countU, countV } = learner;
+    for (const j of [0, countV - 1]) {
+      for (let i = 0; i < countU; i++) setPoint(learner, j * countU + i, getPoint(tent.start, j * countU + i));
+    }
+    expect(shapeDistance(tent.target, learner, { res: RES }).rms).toBeLessThan(1e-9);
+    expect(pairedDistance(tent.target, learner, RES).rms).toBeGreaterThan(0.01);
+  });
+
+  it('needs the same Layout for both surfaces', () => {
+    expect(() => pairedDistance(ball, flatControlNet(), RES)).toThrow(/same Layout/);
   });
 });

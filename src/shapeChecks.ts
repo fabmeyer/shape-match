@@ -84,8 +84,8 @@ export function checkShape(shape: Shape, grid = sampleGrid(shape.net, CHECK_RES)
     const worst = carWheelError(shape.net);
     if (worst > CHECK_TOL) errors.push(`wheels are not round: radius off by ${worst.toExponential(2)}`);
   }
-  // extrusions: the first and last rows are closed caps (a single point)
-  if (kind.startsWith('extrusion')) {
+  // extrusions: the first and last rows are closed caps (a single point), unless the ends are open
+  if (kind.startsWith('extrusion') && !kind.includes('open ends')) {
     for (const row of [grid[0], grid[last]]) if (maxGap(row, row.map(() => row[0])) > CHECK_TOL) errors.push('a cap is not closed');
   }
   return errors;

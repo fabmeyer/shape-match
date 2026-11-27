@@ -87,6 +87,20 @@ describe('starting surfaces of the library shapes', () => {
     expect(startChange(9)).toEqual({ squash: 0.25, stretchX: 1.3, stretchY: 0.75, lean: 0.35 });
   });
 
+  it('keep the rings of a revolution round: flattened and leaning, never stretched', () => {
+    expect(startChange(4, true)).toEqual({ squash: 0.25, stretchX: 1, stretchY: 1, lean: 0.35 });
+    expect(startChange(9, true)).toEqual({ squash: 0.25, stretchX: 1, stretchY: 1, lean: 0.35 });
+    const vase = tasks.find((t) => t.id === 'vase')!;
+    const { countU, countV } = vase.start;
+    for (let j = 0; j < countV; j++) { // every ring of 9 points has one radius around its own centre
+      const ring = Array.from({ length: countU }, (_, i) => getPoint(vase.start, j * countU + i));
+      const ys = ring.map((p) => p[1]);
+      const centreY = (Math.max(...ys) + Math.min(...ys)) / 2;
+      const r = (p: number[]) => Math.max(Math.abs(p[0]), Math.abs(p[1] - centreY));
+      for (const p of ring) expect(r(p)).toBeCloseTo(r(ring[0]), 5);
+    }
+  });
+
   it('keep the Layout and the weights of the Target', () => {
     const shapeIds = new Set(allShapes().map((s) => s.id));
     for (const task of tasks.filter((t) => shapeIds.has(t.id))) {

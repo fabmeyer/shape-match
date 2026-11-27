@@ -94,6 +94,36 @@ describe('shapeDistance', () => {
   });
 });
 
+// the app's grader: two surfaces that look the same get the same grade, however their control points sit
+describe('shapeDistance lined up (nearest point after the best fit)', () => {
+  const house = allTasks().find((t) => t.id === 'house')!;
+  // the House with its hidden cap points moved inside the end faces, then turned and moved: the same shape
+  const learner = cloneNet(house.target);
+  const { countU, countV } = learner;
+  const q = [Math.sin(0.2), 0, 0, Math.cos(0.2)] as const; // 0.4 rad around x
+  for (let j = 0; j < countV; j++) {
+    for (let i = 0; i < countU; i++) {
+      let [x, y, z] = getPoint(house.target, j * countU + i);
+      if (j === 0 || j === countV - 1) { x += 0.2; z -= 0.2; }
+      const c = Math.cos(0.4), s = Math.sin(0.4);
+      setPoint(learner, j * countU + i, [x + 0.3, c * y - s * z, s * y + c * z + 0.1]);
+    }
+  }
+
+  it('grades the shape only: a moved cap point and a turn cost nothing', () => {
+    expect(q[3]).toBeCloseTo(Math.cos(0.2)); // (the turn above, as a quaternion)
+    const lined = shapeDistance(house.target, learner, { res: RES, align: true });
+    expect(lined.rms).toBeLessThan(0.0005);       // a quarter of the Tolerance τ = 0.2 %
+    expect(pairedDistance(house.target, learner, RES, true).rms).toBeGreaterThan(0.003);
+  });
+
+  it('measures without the best fit when the Layouts differ', () => {
+    const vase = allShapes().find((s) => s.id === 'vase')!.net;
+    const plane = flatControlNet();
+    expect(shapeDistance(vase, plane, { res: RES, align: true }).rms).toBe(shapeDistance(vase, plane, { res: RES }).rms);
+  });
+});
+
 describe('pairedDistance (the same grid point on both surfaces)', () => {
   it('is 0 for the Target against itself', () => {
     const d = pairedDistance(ball, ball, RES);
@@ -115,17 +145,26 @@ describe('pairedDistance (the same grid point on both surfaces)', () => {
     }
   });
 
-  // the known limit (docs/research/shape-distance-parameter-wise.md): the Tent's cap point can sit anywhere
+  // the known limit (docs/research/shape-distance-parameter-wise.md): the House's cap point can sit anywhere
   // inside its end face without changing the shape, but the pairs no longer line up
-  it('counts a correct Tent with its cap points elsewhere as off', () => {
-    const tent = allTasks().find((t) => t.id === 'tent')!;
-    const learner = cloneNet(tent.target);
+  it('counts a correct House with its cap points elsewhere as off', () => {
+    const house = allTasks().find((t) => t.id === 'house')!;
+    const learner = cloneNet(house.target);
     const { countU, countV } = learner;
     for (const j of [0, countV - 1]) {
-      for (let i = 0; i < countU; i++) setPoint(learner, j * countU + i, getPoint(tent.start, j * countU + i));
+      for (let i = 0; i < countU; i++) {
+        const [x, y, z] = getPoint(house.target, j * countU + i);
+        setPoint(learner, j * countU + i, [x + 0.2, y, z - 0.2]); // still inside the end face
+      }
     }
-    expect(shapeDistance(tent.target, learner, { res: RES }).rms).toBeLessThan(1e-9);
-    expect(pairedDistance(tent.target, learner, RES).rms).toBeGreaterThan(0.01);
+    expect(shapeDistance(house.target, learner, { res: RES }).rms).toBeLessThan(1e-9);
+    expect(pairedDistance(house.target, learner, RES).rms).toBeGreaterThan(0.01);
+  });
+
+  it('pairs every point of the Tent: no hidden cap point, so a correct Tent is exactly 0', () => {
+    const tent = allTasks().find((t) => t.id === 'tent')!;
+    expect(tent.target.countV).toBe(2);
+    expect(pairedDistance(tent.target, cloneNet(tent.target), RES).rms).toBe(0);
   });
 
   it('needs the same Layout for both surfaces', () => {

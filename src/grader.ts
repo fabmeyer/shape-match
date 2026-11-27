@@ -10,9 +10,12 @@ import { debugLog } from './debugLog.ts';
 import { calibrate, grade, gradingConfig, starMarks, type Calibration, type Grade, type GradingConfig } from './grading.ts';
 
 // the grader the app uses: 'nearest' (point to triangle, ADR 0002) or 'paired' (the teacher's idea: the same
-// grid point on both surfaces), and whether the surfaces are lined up first (the best fit, alignment.ts:
-// only with 'paired'). Change these lines to switch the app; the Developer section can switch live
-export const DEFAULT_METRIC: Metric = 'paired';
+// grid point on both surfaces), and whether the surfaces are lined up first (the best fit, alignment.ts; it
+// always comes from the pairs of the same grid point). Nearest point, lined up grades the shape only: two
+// surfaces that look the same get the same grade, however their control points are spread along them
+// (the Paired distance alone counts that as off: docs/GRADER.md). Change these lines to switch the app;
+// the Developer section can switch live
+export const DEFAULT_METRIC: Metric = 'nearest';
 export const DEFAULT_ALIGN = true;
 
 // the error grid each grader starts on: point to triangle is brute force (64), paired is cheap (128)
@@ -50,7 +53,7 @@ export class Grader {
     this.metric = DEFAULT_METRIC;
   }
 
-  // line up before measuring (only with the Paired distance); the Level is calibrated again with it
+  // line up before measuring (the best fit); the Level is calibrated again with it
   get align(): boolean {
     return this.pass.align;
   }

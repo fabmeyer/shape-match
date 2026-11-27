@@ -41,7 +41,7 @@ describe('leaf', () => {
     }
   });
 
-  it('starts flat, with only the 4 vein points to lower', () => {
+  it('starts flat, with only the 3 vein points to lower', () => {
     const start = leaf.start!;
     let different = 0;
     for (let k = 0; k < countU * countV; k++) {
@@ -51,6 +51,6 @@ describe('leaf', () => {
         different++;
       }
     }
-    expect(different).toBe(4);
+    expect(different).toBe(3);
   });
 });

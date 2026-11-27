@@ -111,9 +111,13 @@ export function weightsLevel(): Task {
 
 // how a library shape's starting surface differs from its Target: always flattened, and from the Tent on
 // it gets harder step by step, so the learner must fix more than one direction:
-//   difficulty 2-4  (Tent, Star, Ball):          flattened, and stretched wider in x
-//   difficulty 5-8  (Vase, House, Tree, Cup):    ... and narrower in y
-//   difficulty 9-11 (Mushroom, Boat, Car):       ... and leaning backwards (along y, away from the Target)
+//   difficulty 2-4  (Tent, Star):                flattened, and stretched wider in x
+//   difficulty 5-8  (House):                     ... and narrower in y
+//   difficulty 9-11 (Boat, Car):                 ... and leaning backwards (along y, away from the Target)
+// a revolution (Ball, Vase, Tree, Cup, Mushroom) is flattened and leans instead, from the Ball on:
+// stretching in x or y would turn every ring into an ellipse of its own size, and the arrows can only move
+// points along one axis, so each point of each ring would need its own exact drag (the Vase had 54).
+// A lean moves every ring as a whole and keeps it round: one rectangle selection and one drag per ring
 // all of these are affine, so the start keeps the Target's Layout and weights (ADR 0001)
 export interface StartChange {
   squash: number;  // z is multiplied by this (z = 0 stays)
@@ -122,7 +126,8 @@ export interface StartChange {
   lean: number;    // y moves by lean · z (z of the Target): the shape tips backwards
 }
 
-export function startChange(difficulty: number): StartChange {
+export function startChange(difficulty: number, revolution = false): StartChange {
+  if (revolution) return { squash: 0.25, stretchX: 1, stretchY: 1, lean: difficulty >= 4 ? 0.35 : 0 };
   return {
     squash: 0.25,
     stretchX: difficulty >= 2 ? 1.3 : 1,
@@ -157,7 +162,7 @@ export function shapeTask(shape: Shape): Task {
     title: `Shape ${shape.difficulty} · ${capitalized(shape.id)}`,
     text: `${shape.order}. ${capitalized(shape.concept)}.`,
     target: shape.net,
-    start: shape.start ?? changedStart(shape.net, startChange(shape.difficulty)),
+    start: shape.start ?? changedStart(shape.net, startChange(shape.difficulty, shape.construction.startsWith('revolution'))),
     tools: ALL_TOOLS,
   };
 }

@@ -66,21 +66,23 @@ Each Level has its own Layout, shared by its Target and its starting Learner sur
 
 | # | Shape | Construction | Points, degree | What it teaches |
 | --- | --- | --- | --- | --- |
-| 1 | leaf | open patch | 5×6, 3×3 | local support |
-| 2 | tent | extrusion of a triangle | 4×4, 1×1 | degree 1 = straight edges, sharp corners |
+| 1 | leaf | open patch: edge, vein, edge | 3×5, 2×3 | local support |
+| 2 | tent | extrusion of a triangle, open ends | 4×2, 1×1 | degree 1 = straight edges, sharp corners |
 | 3 | star | extrusion of a star polygon | 11×4, 1×1 | many points together |
 | 4 | ball | revolution of a half circle | 9×5, 2×2 | weights: only √2/2 makes it round |
-| 5 | vase | revolution, cubic profile | 9×7, 2×3 | reshape the profile, the circle stays exact |
-| 6 | house | extrusion, degree 2, double knots | 11×4, 2×1 | knot multiplicity = degree gives a corner |
+| 5 | vase | revolution, cubic profile (axis, foot, belly, neck, lip) | 9×5, 2×3 | reshape the profile, the circle stays exact |
+| 6 | house | extrusion of a pentagon, degree 1 | 6×4, 1×1 | walls and a roof from five corners |
 | 7 | tree | revolution, degree 1 profile | 9×7, 2×1 | sharp tiers on a round body |
-| 8 | cup | revolution, profile turns back | 9×7, 2×2 | wall thickness |
-| 9 | mushroom | revolution | 9×7, 2×2 | an overhang |
-| 10 | boat | loft: closed hull with deck and cabin, stem and transom | 13×9, 2×2 | a body closed at both ends, a cabin on the deck |
-| 11 | car (**final challenge**) | extrusion of the side outline: box body, trapezoid cabin, two wheel arcs | 29×4, 2×1 | everything at once: straight panels, double knots for corners, wheels that are only round through weights |
+| 8 | cup | revolution: bottom ring, rim ring, inside ring | 9×5, 2×1 | wall thickness |
+| 9 | mushroom | revolution | 9×6, 2×2 | an overhang |
+| 10 | boat | loft: closed hull with a flat deck, stem and transom | 9×5, 2×2 | a body closed at both ends |
+| 11 | car (**final challenge**) | extrusion of the side outline: box body, trapezoid cabin, two wheel arcs | 29×4, 2×1 | everything at once: straight panels, double knots for corners (the only shape that teaches them), wheels that are only round through weights |
+
+**As few control points as the shape allows**: every ring of a revolution keeps the 8 points (9 with the seam) an exact circle needs; beyond that a shape only gets a point where its outline bends. The Star, the House and the Car keep their closed ends (one centre point per end).
 
 **The car in detail**: kept simple, like a car drawn from basic shapes: a box for the body, a trapezoid for the cabin, two round wheels. The outline seen from the side is pushed across the car's width, like the house. The outline is degree 2 with every interior knot twice, so it is 14 pieces with sharp corners between them. A straight piece has its middle control point halfway between its ends. A wheel is two quarter circles below the body whose corner points have weight √2/2. The hood slopes more than the trunk. The checks confirm that the wheels are round to 1e-5 (measured: 2.5e-8). It has 116 control points (the first car, a loft with four separate wheels, had 950, too many to edit by hand).
 
-**Starting surfaces**: from the Tent on, a shape's start is wrong in more than one direction, harder step by step (see `startChange` in `src/target.ts`): flattened and wider in x (Tent, Star, Ball), also narrower in y (Vase, House, Tree, Cup), also leaning backwards (Mushroom, Boat, Car). All of these are affine, so the start keeps the Target's Layout and weights (ADR 0001).
+**Starting surfaces**: from the Tent on, a shape's start is wrong in more than one direction, harder step by step (see `startChange` in `src/target.ts`): flattened and wider in x (Tent, Star), also narrower in y (House), also leaning backwards (Boat, Car). A revolution (Ball, Vase, Tree, Cup, Mushroom) is flattened and leans backwards instead: stretching it would turn every ring into an ellipse of its own size, which the one-axis arrows can only fix point by point. A lean moves each ring as a whole and keeps it round. All of these are affine, so the start keeps the Target's Layout and weights (ADR 0001).
 
 The script checks every Layout (knot count, clamped, degree ≤ 3, weights > 0). For the closed shapes it checks that the seam closes, that the caps of the extrusions close, and that every revolution is round to 1e-5. That last check also tests `nurbs.ts` until the Reference models exist.
 

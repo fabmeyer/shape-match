@@ -66,13 +66,15 @@ export function revolve(profile: ProfilePoint[], q: number, knotsV = clampedUnif
 
 // pushes a closed profile in the xz-plane (first point = last point) along y from -depth/2 to +depth/2
 // rows: back cap (all points at the centre), back profile, front profile, front cap. v has degree 1
-function extrude(profile: [number, number][], p: number, knotsU: number[], depth: number): ControlNet {
+// caps = false leaves both ends open: only the two profile rows, no hidden point in the middle of an end
+function extrude(profile: [number, number][], p: number, knotsU: number[], depth: number, caps = true): ControlNet {
   const n = profile.length - 1; // the last point repeats the first
   const cx = profile.slice(0, n).reduce((s, [x]) => s + x, 0) / n;
   const cz = profile.slice(0, n).reduce((s, [, z]) => s + z, 0) / n;
   const row = (y: number, cap: boolean): WPoint[] =>
     profile.map(([x, z]) => (cap ? { x: cx, y, z: cz, w: 1 } : { x, y, z, w: 1 }));
   const h = depth / 2;
+  if (!caps) return makeNet([row(-h, false), row(h, false)], p, 1, knotsU, [0, 0, 1, 1]);
   return makeNet([row(-h, true), row(-h, false), row(h, false), row(h, true)], p, 1, knotsU, [0, 0, 1 / 3, 2 / 3, 1, 1]);
 }
 
@@ -99,37 +101,32 @@ function collapsed(loop: [number, number][]): [number, number][] {
 // The shapes, from easy to hard
 // ---------------------------------------------------------
 
-// 1 · leaf: an open bicubic patch, the same kind of surface as the start plane
-// kept simple for the first library Level: every control point on the edge lies in the plane z = 0,
-// only the middle vein (the 4 inner points of column i = 2) is lowered, so the upper side of the leaf
-// is a shallow groove along the vein, like a real leaf (and like the earlier leaf, whose edges were
-// higher than its middle). The starting surface is the same leaf lying flat, so one rectangle
-// selection of the vein and one drag down solves it
+// 1 · leaf: an open patch, the same kind of surface as the start plane, kept as small as it can be:
+// 3 columns (left edge, middle vein, right edge) x 5 rows (stem ... tip), degree 2 x 3.
+// Every control point on the edge lies in the plane z = 0, only the 3 inner points of the vein are
+// lowered, so the upper side of the leaf is a shallow groove along the vein, like a real leaf.
+// The starting surface is the same leaf lying flat, so one rectangle selection of the vein and one drag
+// down solves it
 const LEAF_VEIN = -0.35;
 
 function leafNet(vein: number): ControlNet {
-  const countU = 5, countV = 6;
-  const width = [0, 0.45, 0.6, 0.5, 0.3, 0]; // half-width along the leaf, 0 = stem and tip
-  const rows: WPoint[][] = [];
-  for (let j = 0; j < countV; j++) {
-    const y = -1 + (2 * j) / (countV - 1);
-    const row: WPoint[] = [];
-    for (let i = 0; i < countU; i++) {
-      const x = (i / (countU - 1) - 0.5) * 2 * width[j];
-      const inner = i > 0 && i < countU - 1 && j > 0 && j < countV - 1;
-      row.push({ x, y, z: inner && i === 2 ? vein : 0, w: 1 });
-    }
-    rows.push(row);
-  }
-  return makeNet(rows, 3, 3, clampedUniformKnots(countU, 3), clampedUniformKnots(countV, 3));
+  const width = [0, 0.5, 0.6, 0.35, 0]; // half-width along the leaf, 0 = stem and tip
+  const rows: WPoint[][] = width.map((w, j) => {
+    const y = -1 + (2 * j) / (width.length - 1);
+    const inner = j > 0 && j < width.length - 1;
+    return [{ x: -w, y, z: 0, w: 1 }, { x: 0, y, z: inner ? vein : 0, w: 1 }, { x: w, y, z: 0, w: 1 }];
+  });
+  return makeNet(rows, 2, 3, clampedUniformKnots(3, 2), clampedUniformKnots(width.length, 3));
 }
 
 const leaf = () => leafNet(LEAF_VEIN);
 
 // 2 · tent: a triangle pushed along y; degree 1 gives straight edges and sharp corners
+// open at both ends like a tunnel tent: 4 x 2 control points, every one of them a corner the learner can see
+// (a closed end would need a centre point that can sit anywhere in the end face, which the grader can't see)
 function tent(): ControlNet {
   const profile: [number, number][] = [[-0.9, 0], [0.9, 0], [0, 1.1], [-0.9, 0]];
-  return extrude(profile, 1, clampedUniformKnots(profile.length, 1), 1.6);
+  return extrude(profile, 1, clampedUniformKnots(profile.length, 1), 1.6, false);
 }
 
 // 3 · star: a five-pointed star, still degree 1, but 10 corners
@@ -151,26 +148,19 @@ function ball(): ControlNet {
   ], 2, [0, 0, 0, 0.5, 0.5, 1, 1, 1]);
 }
 
-// 5 · vase: a smooth cubic profile turned around the axis, open at the top
+// 5 · vase: a smooth cubic profile turned around the axis, open at the top. 5 profile points are enough:
+// the axis, the foot, the belly, the neck and the lip
 function vase(): ControlNet {
   return revolve([
-    { r: 0, z: 0 }, { r: 0.45, z: 0 }, { r: 0.75, z: 0.35 }, { r: 0.75, z: 0.75 },
-    { r: 0.3, z: 1.15 }, { r: 0.25, z: 1.45 }, { r: 0.42, z: 1.75 },
+    { r: 0, z: 0 }, { r: 0.5, z: 0 }, { r: 1.05, z: 0.75 }, { r: 0.05, z: 1.25 }, { r: 0.42, z: 1.75 },
   ], 3);
 }
 
-// 6 · house: the outline of a house pushed along y. Degree 2 with every interior knot twice:
-// multiplicity = degree turns the smooth curve into corners (the crease lesson)
+// 6 · house: the outline of a house pushed along y, degree 1 like the tent: only its 5 corners
+// (two walls, two roof sides and the floor), every one of them a sharp corner
 function house(): ControlNet {
-  const corners: [number, number][] = [[-0.8, 0], [0.8, 0], [0.8, 0.9], [0, 1.55], [-0.8, 0.9], [-0.8, 0]];
-  // between two corners a straight degree-2 piece needs its midpoint as the middle control point
-  const profile: [number, number][] = [corners[0]];
-  for (let k = 1; k < corners.length; k++) {
-    const [ax, az] = corners[k - 1];
-    const [bx, bz] = corners[k];
-    profile.push([(ax + bx) / 2, (az + bz) / 2], [bx, bz]);
-  }
-  return extrude(profile, 2, repeatedKnots(corners.length - 1, 2, 2), 1.4);
+  const profile: [number, number][] = [[-0.8, 0], [0.8, 0], [0.8, 0.9], [0, 1.55], [-0.8, 0.9], [-0.8, 0]];
+  return extrude(profile, 1, clampedUniformKnots(profile.length, 1), 1.4);
 }
 
 // 7 · tree: a fir with a trunk and two layers of branches, a degree-1 profile turned around the axis
@@ -181,44 +171,40 @@ function tree(): ControlNet {
   ], 1);
 }
 
-// 8 · cup: the profile goes up the outside, over the rim and back down the inside,
-// so the cup has a wall thickness. Degree 2 rounds the rim and the bottom edge
+// 8 · cup: a vessel from three rings: the bottom edge, the rim and the inside bottom (and the centre of the
+// bottom, outside and inside, on the axis). The profile goes up the outside, over the rim and back down
+// the inside, so the cup has a wall. Degree 1: straight walls, a sharp rim
 function cup(): ControlNet {
   return revolve([
-    { r: 0, z: 0 }, { r: 0.6, z: 0 }, { r: 0.66, z: 1.0 }, { r: 0.6, z: 1.08 },
-    { r: 0.52, z: 0.98 }, { r: 0.48, z: 0.15 }, { r: 0, z: 0.15 },
-  ], 2);
+    { r: 0, z: 0 }, { r: 0.6, z: 0 }, { r: 0.66, z: 1.0 }, { r: 0.54, z: 0.12 }, { r: 0, z: 0.12 },
+  ], 1);
 }
 
-// 9 · mushroom: a stem with a cap that hangs over it
+// 9 · mushroom: a stem with a cap that hangs over it: the axis, the foot of the stem, the top of the stem,
+// the edge of the cap, the shoulder of the cap and its top on the axis. Degree 2 rounds every bend
 function mushroom(): ControlNet {
   return revolve([
-    { r: 0, z: 0 }, { r: 0.22, z: 0 }, { r: 0.16, z: 0.6 }, { r: 0.8, z: 0.6 },
-    { r: 0.9, z: 0.85 }, { r: 0.6, z: 1.25 }, { r: 0, z: 1.3 },
+    { r: 0, z: 0 }, { r: 0.2, z: 0 }, { r: 0.16, z: 0.65 }, { r: 0.95, z: 0.65 }, { r: 0.85, z: 1.3 }, { r: 0, z: 1.3 },
   ], 2);
 }
 
-// 10 · boat: a closed hull with a deck and a small cabin, lofted from bow to stern.
-// Each section goes around the cabin, the deck and the hull (degree 2, so the bilge is round).
-// At the bow the section is a vertical line (the stem), at the stern it closes to a point
+// 10 · boat: a closed hull with a flat deck, lofted from bow to stern.
+// Each section goes around the deck and the hull (degree 2, so the bilge is round).
+// At the bow the section is a vertical line (the stem), at the stern it closes to a point (the transom)
 function boat(): ControlNet {
-  // half-width, deck height, keel height, cabin half-width, cabin top (= deck: no cabin)
-  const section = (w: number, deck: number, keel: number, cw = 0, top = deck): [number, number][] => {
+  // half-width, deck height, keel height
+  const section = (w: number, deck: number, keel: number): [number, number][] => {
     const mid = (deck + keel) / 2;
-    return [[0, top], [cw, top], [cw, deck], [w, deck], [w, mid], [0.55 * w, keel + 0.05], [0, keel],
-      [-0.55 * w, keel + 0.05], [-w, mid], [-w, deck], [-cw, deck], [-cw, top], [0, top]];
+    return [[0, deck], [w, deck], [w, mid], [0.55 * w, keel + 0.05], [0, keel],
+      [-0.55 * w, keel + 0.05], [-w, mid], [-w, deck], [0, deck]];
   };
   const stern = section(0.55, 0.7, 0.2);
   return loft([
     { y: -1.3, loop: section(0, 0.9, 0.35) },  // stem: all points in x = 0
-    { y: -1.0, loop: section(0.32, 0.8, 0.12) },
-    { y: -0.55, loop: section(0.62, 0.72, 0.02) },
-    { y: -0.15, loop: section(0.72, 0.68, 0, 0.42, 0.68) },
-    { y: 0.0, loop: section(0.72, 0.68, 0, 0.42, 1.05) },  // front of the cabin
-    { y: 0.55, loop: section(0.7, 0.68, 0, 0.42, 1.05) },  // back of the cabin
-    { y: 0.7, loop: section(0.68, 0.68, 0.02, 0.42, 0.68) },
-    { y: 1.15, loop: stern },                   // transom
-    { y: 1.15, loop: collapsed(stern) },        // closes the transom
+    { y: -0.7, loop: section(0.55, 0.78, 0.06) },
+    { y: 0.2, loop: section(0.72, 0.7, 0) },
+    { y: 1.15, loop: stern },                  // transom
+    { y: 1.15, loop: collapsed(stern) },       // closes the transom
   ], 2);
 }
 
@@ -282,15 +268,15 @@ function car(): ControlNet {
 export function allShapes(): Shape[] {
   return [
     { id: 'leaf', order: 'A leaf for a brooch', construction: 'open patch', concept: 'local support: lower the middle vein, the edge stays flat', difficulty: 1, net: leaf(), start: leafNet(0) },
-    { id: 'tent', order: 'A tent for a toy camp', construction: 'extrusion, degree 1', concept: 'degree 1 = straight edges and sharp corners', difficulty: 2, net: tent() },
+    { id: 'tent', order: 'A tent for a toy camp', construction: 'extrusion, degree 1, open ends', concept: 'degree 1 = straight edges and sharp corners', difficulty: 2, net: tent() },
     { id: 'star', order: 'A star for the Christmas tree', construction: 'extrusion, degree 1', concept: 'many control points together (superposition)', difficulty: 3, net: star() },
     { id: 'ball', order: 'A perfectly round ball', construction: 'revolution', concept: 'weights: only √2/2 makes the circle exact', difficulty: 4, net: ball() },
     { id: 'vase', order: 'A vase for flowers', construction: 'revolution, cubic profile', concept: 'reshape the profile, the circle stays exact', difficulty: 5, net: vase() },
-    { id: 'house', order: 'A house for a model railway', construction: 'extrusion, degree 2', concept: 'knot multiplicity = degree gives a corner', difficulty: 6, net: house() },
+    { id: 'house', order: 'A house for a model railway', construction: 'extrusion, degree 1', concept: 'walls and a roof from five corners: fix the height, the width and the depth', difficulty: 6, net: house() },
     { id: 'tree', order: 'A fir tree', construction: 'revolution, degree 1 profile', concept: 'sharp tiers on a round body', difficulty: 7, net: tree() },
-    { id: 'cup', order: 'A cup', construction: 'revolution, degree 2 profile', concept: 'a profile that turns back on itself (wall thickness)', difficulty: 8, net: cup() },
+    { id: 'cup', order: 'A cup', construction: 'revolution, degree 1 profile', concept: 'a profile that turns back on itself (wall thickness)', difficulty: 8, net: cup() },
     { id: 'mushroom', order: 'A mushroom', construction: 'revolution, degree 2 profile', concept: 'an overhang: the cap hangs over the stem', difficulty: 9, net: mushroom() },
-    { id: 'boat', order: 'A boat', construction: 'loft, closed hull with deck', concept: 'a stem and a transom close the body, a cabin sits on the deck', difficulty: 10, net: boat() },
+    { id: 'boat', order: 'A boat', construction: 'loft, closed hull with deck', concept: 'a stem and a transom close the body', difficulty: 10, net: boat() },
     { id: 'car', order: 'A toy car (final challenge)', construction: 'extrusion, degree 2, rational wheel arcs', concept: 'everything at once: straight panels, corners from double knots and wheels that are only round through weights', difficulty: 11, net: car() },
   ];
 }
